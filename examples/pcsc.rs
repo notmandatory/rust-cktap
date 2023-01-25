@@ -1,8 +1,7 @@
-use ciborium::de::from_reader;
-use ciborium::value::Value;
+extern crate core;
 
-use pcsc::*;
-use rust_cktap::{ISO_APPLET_SELECT_APDU, StatusResponse};
+use pcsc::{Context, Error, MAX_BUFFER_SIZE, Protocols, Scope, ShareMode};
+use rust_cktap::{AppletSelect, CommandApdu, ResponseApdu, StatusCommand, StatusResponse};
 
 fn main() {
     // Establish a PC/SC context.
@@ -47,20 +46,32 @@ fn main() {
         }
     };
 
-    // Send ISO Applet Select command.
-    let apdu = ISO_APPLET_SELECT_APDU;
-    println!("Sending 'ISO Applet Select' APDU: {:?}\n", &apdu);
+    // Send ISO App Select.
+    let applet_select_apdu = AppletSelect::default().apdu_bytes();
+    println!("Sending 'ISO Applet Select' APDU: {:?}\n", &applet_select_apdu);
     let mut rapdu_buf = [0; MAX_BUFFER_SIZE];
-    let rapdu = match card.transmit(&apdu, &mut rapdu_buf) {
+    let rapdu = match card.transmit(&applet_select_apdu.as_slice(), &mut rapdu_buf) {
         Ok(rapdu) => rapdu,
         Err(err) => {
             eprintln!("Failed to transmit APDU command to card: {}", err);
             std::process::exit(1);
         }
     };
-    println!("APDU response: {:?}\n", &rapdu);
-    let rapdu_value: Value = from_reader(&rapdu[..]).unwrap();
-    println!("APDU response value: {:?}\n", rapdu_value);
-    let rapdu_struct: StatusResponse = rapdu_value.deserialized().unwrap();
-    println!("APDU response struct: {:?}\n", rapdu_struct);
+    let status_response = StatusResponse::from_cbor(rapdu.to_vec());
+    println!("Received 'Status' APDU: {:?}\n", status_response);
+
+    // Send 'Status' Request.
+    let status_apdu = StatusCommand::default().apdu_bytes();
+    println!("Sending 'Status' APDU: {:?}\n", &status_apdu);
+    let mut rapdu_buf = [0; MAX_BUFFER_SIZE];
+    let rapdu = match card.transmit(&status_apdu.as_slice(), &mut rapdu_buf) {
+        Ok(rapdu) => rapdu,
+        Err(err) => {
+            eprintln!("Failed to transmit APDU command to card: {}", err);
+            std::process::exit(1);
+        }
+    };
+
+    let status_response = StatusResponse::from_cbor(rapdu.to_vec());
+    println!("Received 'Status' APDU: {:?}\n", status_response);
 }
