@@ -2,8 +2,8 @@ extern crate core;
 
 use pcsc::{Context, Protocols, Scope, ShareMode, MAX_BUFFER_SIZE};
 use rust_cktap::{
-    AppletSelect, CommandApdu, Error, ResponseApdu, StatusCommand, StatusResponse, WaitCommand,
-    WaitResponse,
+    AppletSelect, CertsCommand, CertsResponse, CommandApdu, Error, ReadCommand, ReadResponse,
+    ResponseApdu, StatusCommand, StatusResponse, WaitCommand, WaitResponse,
 };
 
 fn main() -> Result<(), Error> {
@@ -46,13 +46,33 @@ fn main() -> Result<(), Error> {
     let status_response = StatusResponse::from_cbor(rapdu.to_vec())?;
     println!("Received 'Status' APDU: {:?}\n", status_response);
 
-    // Send 'Wait' Command.
-    let wait_apdu = WaitCommand::new(None, None).apdu_bytes();
-    println!("Sending 'Wait' APDU: {:?}\n", &wait_apdu);
+    // Send 'Certs' Command.
+    let certs_apdu = CertsCommand::default().apdu_bytes();
+    println!("Sending 'Certs' APDU: {:?}\n", &certs_apdu);
     let mut rapdu_buf = [0; MAX_BUFFER_SIZE];
-    let rapdu = card.transmit(&wait_apdu.as_slice(), &mut rapdu_buf)?;
-    let wait_response = WaitResponse::from_cbor(rapdu.to_vec())?;
-    println!("Received 'Wait' APDU: {:?}\n", wait_response);
+    let rapdu = card.transmit(&certs_apdu.as_slice(), &mut rapdu_buf)?;
+    let certs_response = CertsResponse::from_cbor(rapdu.to_vec())?;
+    println!("Received 'Certs' APDU: {:?}\n", &certs_response);
+    println!("Received 'Certs' cert_chain: {:?}\n", &certs_response.cert_chain());
+
+    // Send 'Read' Command.
+    let read_struct = ReadCommand::new(status_response.card_nonce, Some(vec![0xA; 33]), Some("935887".to_string()));
+    //let read_struct = ReadCommand::new(status_response.card_nonce, None, None);
+    println!("Sending 'Read' Struct: {:?}\n", &read_struct);
+    let read_apdu = read_struct.apdu_bytes();
+    println!("Sending 'Read' APDU: {:?}\n", &read_apdu);
+    let mut rapdu_buf = [0; MAX_BUFFER_SIZE];
+    let rapdu = card.transmit(&read_apdu.as_slice(), &mut rapdu_buf)?;
+    let read_response = ReadResponse::from_cbor(rapdu.to_vec())?;
+    println!("Received 'Read' APDU: {:?}\n", read_response);
+
+    // // Send 'Wait' Command.
+    // let wait_apdu = WaitCommand::new(None, None).apdu_bytes();
+    // println!("Sending 'Wait' APDU: {:?}\n", &wait_apdu);
+    // let mut rapdu_buf = [0; MAX_BUFFER_SIZE];
+    // let rapdu = card.transmit(&wait_apdu.as_slice(), &mut rapdu_buf)?;
+    // let wait_response = WaitResponse::from_cbor(rapdu.to_vec())?;
+    // println!("Received 'Wait' APDU: {:?}\n", wait_response);
 
     // testing authenticated commands
 

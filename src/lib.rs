@@ -126,11 +126,24 @@ pub struct ReadCommand {
     /// 'read' command
     cmd: String,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
+    #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
     /// (TAPSIGNER only) auth is required, 33 bytes
+    #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
     /// (TAPSIGNER only) auth is required encrypted CVC value, 6 to 32 bytes
-    xcvc: Option<Vec<u8>>,
+    xcvc: Option<String>,
+}
+
+impl ReadCommand {
+    pub fn new(nonce: Vec<u8>, epubkey: Option<Vec<u8>>, xcvc: Option<String>) -> Self {
+        ReadCommand {
+            cmd: "read".to_string(),
+            nonce,
+            epubkey,
+            xcvc,
+        }
+    }
 }
 
 impl CommandApdu for ReadCommand {}
@@ -150,13 +163,14 @@ pub struct WaitCommand {
     /// 'wait' command
     cmd: String,
     /// app's ephemeral public key (optional)
+    #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
     /// encrypted CVC value (optional), 6 to 32 bytes
-    xcvc: Option<Vec<u8>>,
+    xcvc: Option<String>,
 }
 
 impl WaitCommand {
-    pub fn new(epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(epubkey: Option<Vec<u8>>, xcvc: Option<String>) -> Self {
         WaitCommand {
             cmd: "wait".to_string(),
             epubkey,
@@ -167,31 +181,49 @@ impl WaitCommand {
 
 impl CommandApdu for WaitCommand {}
 
+/// This command is used to verify the card was made by Coinkite and is not counterfeit. Two
+/// requests are needed: first, fetch the certificates, and then provide a nonce to be signed.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CertsCommand {
+    /// 'certs' command
+    cmd: String,
+}
+
+impl Default for CertsCommand {
+    fn default() -> Self {
+        CertsCommand {
+            cmd: "certs".to_string(),
+        }
+    }
+}
+
+impl CommandApdu for CertsCommand {}
+
 // Responses
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ErrorResponse {
-    error: String,
-    code: usize,
+    pub error: String,
+    pub code: usize,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct StatusResponse {
-    proto: usize,
-    ver: String,
-    birth: usize,
-    slots: Option<Vec<usize>>,
-    addr: Option<String>,
-    tapsigner: Option<bool>,
-    satschip: Option<bool>,
-    path: Option<Vec<usize>>,
-    num_backups: Option<usize>,
+    pub proto: usize,
+    pub ver: String,
+    pub birth: usize,
+    pub slots: Option<Vec<usize>>,
+    pub addr: Option<String>,
+    pub tapsigner: Option<bool>,
+    pub satschip: Option<bool>,
+    pub path: Option<Vec<usize>>,
+    pub num_backups: Option<usize>,
     #[serde(with = "serde_bytes")]
-    pubkey: Vec<u8>,
+    pub pubkey: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    card_nonce: Vec<u8>,
-    testnet: Option<bool>,
-    auth_delay: Option<usize>,
+    pub card_nonce: Vec<u8>,
+    pub testnet: Option<bool>,
+    pub auth_delay: Option<usize>,
 }
 
 impl ResponseApdu for StatusResponse {}
@@ -207,11 +239,14 @@ impl ResponseApdu for StatusResponse {}
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ReadResponse {
     /// signature over a bunch of fields using private key of slot, 64 bytes
-    sig: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub sig: Vec<u8>,
     /// public key for this slot/derivation, 33 bytes
-    pubkey: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub pubkey: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
-    card_nonce: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
 }
 
 impl ResponseApdu for ReadResponse {}
@@ -228,3 +263,27 @@ pub struct WaitResponse {
 }
 
 impl ResponseApdu for WaitResponse {}
+
+/// The response is static for any particular card. The values are captured during factory setup.
+/// Each entry in the list is a 65-byte signature. The first signature signs the card's public key,
+/// and each following signature signs the public key used in the previous signature. Although two
+/// levels of signatures are planned, more are possible.
+#[derive(Deserialize, Clone, Debug)]
+pub struct CertsResponse {
+    /// list of certificates, from 'batch' to 'root'
+    cert_chain: Vec<Value>,
+}
+impl ResponseApdu for CertsResponse {}
+
+impl CertsResponse {
+    pub fn cert_chain(&self) -> Vec<Vec<u8>> {
+        self.clone()
+            .cert_chain
+            .into_iter()
+            .filter_map(|v| match v {
+                Value::Bytes(bv) => Some(bv),
+                _ => None,
+            })
+            .collect()
+    }
+}
