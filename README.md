@@ -1,6 +1,6 @@
 # rust-cktap
 
-A Rust implementation of the Coinkite Tap Protocol for use with [SATSCARD]™ and [TAPSIGNER]™ products.
+A Rust implementation of the [Coinkite Tap Protocol](https://github.com/coinkite/coinkite-tap-proto) for use with [SATSCARD] and [TAPSIGNER] products.
 
 ### Desktop Example
 
@@ -8,7 +8,7 @@ A Rust implementation of the Coinkite Tap Protocol for use with [SATSCARD]™ an
 
 1. USB PCSC NFC card reader, for example:  
    * [Advanced Card Systems Ltd. ACR1252](https://www.acs.com.hk/en/products/342/acr1252u-usb-nfc-reader-iii-nfc-forum-certified-reader/)
-2. Coinkite SATSCARD™ and TAPSIGNER™ cards
+2. Coinkite SATSCARD and TAPSIGNER cards
 
 #### Run steps
 
