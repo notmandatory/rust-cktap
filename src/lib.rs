@@ -1,6 +1,7 @@
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
+use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -132,15 +133,17 @@ pub struct ReadCommand {
     #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
     /// (TAPSIGNER only) auth is required encrypted CVC value, 6 to 32 bytes
-    xcvc: Option<String>,
+    #[serde(with = "serde_bytes")]
+    xcvc: Option<Vec<u8>>,
 }
 
 impl ReadCommand {
-    pub fn new(nonce: Vec<u8>, epubkey: Option<Vec<u8>>, xcvc: Option<String>) -> Self {
+    pub fn new(nonce: Vec<u8>, epubkey: Option<PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
+        let epubkey_bytes = epubkey.map(|pk| pk.serialize().to_vec());
         ReadCommand {
             cmd: "read".to_string(),
             nonce,
-            epubkey,
+            epubkey: epubkey_bytes,
             xcvc,
         }
     }
@@ -166,11 +169,12 @@ pub struct WaitCommand {
     #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
     /// encrypted CVC value (optional), 6 to 32 bytes
-    xcvc: Option<String>,
+    #[serde(with = "serde_bytes")]
+    xcvc: Option<Vec<u8>>,
 }
 
 impl WaitCommand {
-    pub fn new(epubkey: Option<Vec<u8>>, xcvc: Option<String>) -> Self {
+    pub fn new(epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
         WaitCommand {
             cmd: "wait".to_string(),
             epubkey,
@@ -181,6 +185,8 @@ impl WaitCommand {
 
 impl CommandApdu for WaitCommand {}
 
+/// Certs Command
+///
 /// This command is used to verify the card was made by Coinkite and is not counterfeit. Two
 /// requests are needed: first, fetch the certificates, and then provide a nonce to be signed.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -198,6 +204,118 @@ impl Default for CertsCommand {
 }
 
 impl CommandApdu for CertsCommand {}
+
+/// Check Command
+///
+/// This command is used to verify the card was made by Coinkite and is not counterfeit. Two
+/// requests are needed: first, fetch the certificates, and then provide a nonce to be signed.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CheckCommand {
+    /// 'check' command
+    cmd: String,
+    /// random value from app, 16 bytes
+    #[serde(with = "serde_bytes")]
+    nonce: Vec<u8>,
+}
+
+impl CheckCommand {
+    pub fn new(nonce: Vec<u8>) -> Self {
+        CheckCommand {
+            cmd: "check".to_string(),
+            nonce,
+        }
+    }
+}
+
+impl CommandApdu for CheckCommand {}
+
+/// New Command
+///
+/// SATSCARD: Use this command to pick a new private key and start a fresh slot. The operation cannot be performed if the current slot is sealed.
+///
+/// TAPSIGNER: This command is only used once.
+///
+/// The slot number is included in the request to prevent command replay.
+///
+/// At this point:
+///
+///     No new slots available? Abort and fail command.
+///     A new key pair is picked and stored into the new slot.
+///         The chain_code must be used in that process and stored.
+///         The card uses TRNG to pick a new master_pubkey (pair).
+///
+/// The new values take effect immediately, so some fields of the next status response will have
+/// new values.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct NewCommand {
+    /// 'new' command
+    cmd: String,
+    /// (optional: default zero) slot to be affected, must equal currently-active slot number
+    slot: usize,
+    /// app's entropy share to be applied to new slot (optional on SATSCARD), 32 bytes
+    #[serde(with = "serde_bytes")]
+    chain_code: Option<Vec<u8>>,
+    /// app's ephemeral public key, 33 bytes
+    #[serde(with = "serde_bytes")]
+    epubkey: Vec<u8>,
+    /// encrypted CVC value, 6 bytes
+    #[serde(with = "serde_bytes")]
+    xcvc: Vec<u8>,
+}
+
+impl NewCommand {
+    pub fn new(slot: usize, chain_code: Option<Vec<u8>>, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
+        NewCommand {
+            cmd: "new".to_string(),
+            slot,
+            chain_code,
+            epubkey,
+            xcvc,
+        }
+    }
+}
+
+impl CommandApdu for NewCommand {}
+
+/// Dump Command
+///
+/// This reveals the details for any slot. The current slot is not affected. This is a no-op in
+/// terms of response content, if slots aren't available yet, or if a slot hasn't been unsealed.
+/// The factory uses this to verify the CVC is printed correctly without side effects.
+///
+/// If the epubkey or xcvc is absent, the command still works, but the no sensitive information is
+/// shared.
+///
+/// Incorrect auth values for xcvc will fail as normal. Omit the xcvc and epubkey value to proceed
+/// without authentication if CVC is unknown.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct DumpCommand {
+    /// 'dump' command
+    cmd: String,
+    /// which slot to dump, must be unsealed.
+    slot: usize,
+    /// app's ephemeral public key (optional), 33 bytes
+    #[serde(with = "serde_bytes")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    epubkey: Option<Vec<u8>>,
+    /// encrypted CVC value (optional), 6 bytes
+    #[serde(with = "serde_bytes")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    xcvc: Option<Vec<u8>>,
+}
+
+impl DumpCommand {
+    pub fn new(slot: usize, epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
+        DumpCommand {
+            cmd: "dump".to_string(),
+            slot,
+            epubkey,
+            xcvc,
+        }
+    }
+}
+
+impl CommandApdu for DumpCommand {}
 
 // Responses
 
@@ -223,6 +341,7 @@ pub struct StatusResponse {
     #[serde(with = "serde_bytes")]
     pub card_nonce: Vec<u8>,
     pub testnet: Option<bool>,
+    #[serde(default)]
     pub auth_delay: Option<usize>,
 }
 
@@ -257,9 +376,10 @@ impl ResponseApdu for ReadResponse {}
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct WaitResponse {
     /// command result
-    success: bool,
+    pub success: bool,
     /// how much more delay is now required
-    auth_delay: usize,
+    #[serde(default)]
+    pub auth_delay: usize,
 }
 
 impl ResponseApdu for WaitResponse {}
@@ -287,3 +407,145 @@ impl CertsResponse {
             .collect()
     }
 }
+
+/// Check Certs Response
+///
+/// The auth_sig value is a signature made using the card's public key (card_pubkey).
+///
+/// The signature is created from the digest (SHA-256) of these bytes:
+///
+/// b'OPENDIME' (8 bytes)
+/// (card_nonce - 16 bytes)
+/// (nonce from check command - 16 bytes)
+///
+/// Starting in version 1.0.0 of the SATSCARD, the public key (33 bytes) for the current slot is appended to the above message. (If the current slot is unsealed or not yet used, this does not happen.) With the pubkey in place, the message being signed will be:
+///
+/// b'OPENDIME' (8 bytes)
+/// (card_nonce - 16 bytes)
+/// (nonce from check command - 16 bytes)
+/// (pubkey of current sealed slot - 33 bytes)
+///
+/// The app verifies this signature and checks that the public key in use is the card_pubkey to prove it is talking to a genuine Coinkite card. The signatures of each certificate chain element are then verified by recovering the pubkey at each step. This checks that the batch certificate is signing the card's pubkey, that the root certificate is signing the batch certificate's key and so on. The root certificate's expected pubkey must be shared out-of-band and already known to the app.
+///
+/// At this time, the only valid factory root pubkey is:
+///
+/// 03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1
+#[derive(Deserialize, Clone, Debug)]
+pub struct CheckResponse {
+    /// signature using card_pubkey, 64 bytes
+    #[serde(with = "serde_bytes")]
+    auth_sig: Vec<u8>,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for CheckResponse {}
+
+/// New Response
+///
+/// There is a very, very small — 1 in 2128 — chance of arriving at an invalid private key. This
+/// returns error 205 (unlucky number). Retries are allowed with no delay. Also, buy a lottery
+/// ticket immediately.
+///
+/// SATSCARD: derived address is generated based on m/0.
+///
+/// TAPSIGNER: uses the default derivation path of m/84h/0h/0h.
+///
+/// In either case, the status and read commands are required to learn the details of the new
+/// address/key.
+#[derive(Deserialize, Clone, Debug)]
+pub struct NewResponse {
+    /// slot just made
+    slot: usize,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for NewResponse {}
+
+/// Dump Response
+///
+/// Without the CVC, the dump command returns just the sealed/unsealed/unused status for each slot,
+/// with the exception of unsealed slots where the address in full is also provided.
+#[derive(Deserialize, Clone, Debug)]
+pub struct DumpResponse {
+    /// slot just made
+    slot: usize,
+    /// private key for spending (for addr), 32 bytes
+    /// The private keys are encrypted, XORed with the session key
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    privkey: Option<Vec<u8>>,
+    /// public key, 33 bytes
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pubkey: Vec<u8>,
+    /// nonce provided by customer originally
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    chain_code: Option<Vec<u8>>,
+    /// master private key for this slot (was picked by card), 32 bytes
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    master_pk: Option<Vec<u8>>,
+    /// flag that slots unsealed for unusual reasons (absent if false)
+    #[serde(default)]
+    tampered: Option<bool>,
+    /// if no xcvc provided, slot used status
+    #[serde(default)]
+    used: Option<bool>,
+    /// if no xcvc provided, slot sealed status
+    sealed: Option<bool>,
+    /// if no xcvc provided, full payment address (not censored)
+    #[serde(default)]
+    addr: Option<String>,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for DumpResponse {}
+
+// Response for a used slot with XCVC provided:
+//
+// {
+//     'slot': 0,                     # which slot is being dumped
+//     'privkey': (32 bytes),         # private key for spending (for addr)
+//     'pubkey': (33 bytes),          # public key
+//     'chain_code': (32 bytes),      # nonce provided by customer originally
+//     'master_pk': (32 bytes),       # master private key for this slot (was picked by card)
+//     'tampered': (bool),            # flag that slots unsealed for unusual reasons (absent if false)
+//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
+// }
+//
+// The private keys are encrypted, XORed with the session key, but the other values are shared unencrypted.
+//
+// The tampered field is only present (and True) if the slot was unsealed due to confusion or uncertainty about its status. In other words, if the card unsealed itself rather than via a successful unseal command.
+//
+// If the XCVC (and/or epubkey) is not provided, then the response contains the full payment address and indicates it is unsealed. In version 1.0.3 and later, the full compressed pubkey for the payment address is also provided.
+//
+// {
+//     'slot': 0,                     # which slot is being dumped
+//     'sealed': False,
+//     'addr': 'bc1qsqkhv..qf735wvl3lh8',   # full payment address (not censored)
+//     'pubkey': (33 bytes),          # public key corresponding to payment address (since v1.0.3)
+//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
+// }
+//
+// The response for an unused slot (no CVC provided):
+//
+// {
+//     'slot': 2,                     # which slot is being dumped
+//     'used': False,
+//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
+// }
+//
+// For the currently active slot, the response is (no CVC provided):
+//
+// {
+//     'slot': 3,                     # which slot is being dumped
+//     'sealed': True,
+//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
+// }
