@@ -14,6 +14,12 @@ pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
 pub const CARD_NONCE_SIZE: usize = 16;
 pub const USER_NONCE_SIZE: usize = 16;
 
+#[derive(Debug)]
+pub enum CardType {
+    TapSigner,
+    SatsCard
+}
+
 // Errors
 
 #[derive(Debug)]
@@ -150,6 +156,14 @@ impl ReadCommand {
 }
 
 impl CommandApdu for ReadCommand {}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct DeriveCommand {
+    cmd: String,
+    /// provided by app, cannot be all same byte (& should be random), 16 bytes
+    #[serde(with = "serde_bytes")]
+    nonce: Vec<u8>,
+}
 
 /// Wait Command
 ///
@@ -346,6 +360,24 @@ pub struct StatusResponse {
 }
 
 impl ResponseApdu for StatusResponse {}
+
+impl StatusResponse {
+    pub fn card_type(&self) -> CardType {
+        if self.addr.is_none()
+        && self.tapsigner.is_some()
+        && self.tapsigner.unwrap() == true {
+            CardType::TapSigner
+        } else {
+            CardType::SatsCard
+        }
+    }
+}
+
+// impl std::fmt::Display for StatusResponse {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "Name: {}, Age: {}", self.name, self.age)
+//     }
+// }
 
 /// Read Response
 ///

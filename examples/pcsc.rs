@@ -16,30 +16,7 @@ use secp256k1::{rand, All, PublicKey, Secp256k1, SecretKey};
 use serde::Deserialize;
 
 fn main() -> Result<(), Error> {
-    let mut secp = Secp256k1::new();
-
-    let tapsigner_cvc = "935887".to_string();
-    let satscard_cvc = "584048".to_string();
-
-    // Establish a PC/SC context.
-    let ctx = Context::establish(Scope::User)?;
-
-    // List available readers.
-    let mut readers_buf = [0; 2048];
-    let mut readers = ctx.list_readers(&mut readers_buf)?;
-
-    // Use the first reader.
-    let reader = match readers.next() {
-        Some(reader) => Ok(reader),
-        None => {
-            //println!("No readers are connected.");
-            Err(Error::PcSc("No readers are connected.".to_string()))
-        }
-    }?;
-    println!("Using reader: {:?}\n", reader);
-
-    // Connect to the card.
-    let card = ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?;
+    let card = find_first()?;
 
     let status = applet_select(&card)?;
     dbg!(&status);
@@ -69,25 +46,23 @@ fn main() -> Result<(), Error> {
     //     dbg!(new_response);
     // }
 
-    // if is a TAPSIGNER and has pubkey call read
-    if status.addr.is_none()
-        && status.tapsigner.is_some()
-        && status.tapsigner.unwrap() == true
-        && status.pubkey.len() == 33
-    {
-        let rng = &mut rand::thread_rng();
-        let nonce = rand_nonce(rng).to_vec();
-        let (eseckey, epubkey, xcvc) =
-            calc_xcvc(&secp, &"read".to_string(), &status, &tapsigner_cvc);
-        let read_response = read_command(&card, nonce, Some(epubkey), Some(xcvc))?;
-        dbg!(read_response);
-        // TODO validate read response sig
-    } else {
-        let rng = &mut rand::thread_rng();
-        let nonce = rand_nonce(rng).to_vec();
-        let read_response = read_command(&card, nonce, None, None)?;
-        dbg!(read_response);
-        // TODO validate read response sig
+    match status.card_type() {
+        SatsCard => {
+            let rng = &mut rand::thread_rng();
+            let nonce = rand_nonce(rng).to_vec();
+            // SatsCard.read() // nonce generated in method
+            let read_response = read_command(&card, nonce, None, None)?;
+            dbg!(read_response);
+            // TODO validate read response sig
+        },
+        TapSigner if status.pubkey.len() == 33 => {
+            let tapsigner = TapSigner::from_pcsc(card);
+            // tapsigner.set_cvc(cvc);
+            dbg!(tapsigner.read(&status));
+            
+            // TODO validate read response sig
+        },
+        TapSigner => { print!("TapSigner without 33 byte key") }
     }
 
     // // testing authenticated commands
@@ -122,6 +97,59 @@ fn main() -> Result<(), Error> {
     // byte array xor
     // let c: Vec<_> = a.iter().zip(b).map(|(x, y)| x ^ y).collect();
     Ok(())
+}
+
+struct TapSigner {
+    card: Card,
+    cvc: Option<String>,
+    secp: Secp256k1<All>,
+    card_nonce: Vec<u8>
+}
+
+impl TapSigner {
+    fn from_pcsc(card: Card) -> Self {
+        let rng = &mut rand::thread_rng();
+        let nonce = rand_nonce(rng).to_vec();
+        let mut secp: Secp256k1<All> = Secp256k1::new();
+        Self { card, cvc: None, card_nonce: nonce, secp }
+    }
+
+    fn set_cvc(&mut self, cvc: String) {
+        self.cvc = Some(cvc);
+    }
+
+    fn read(&self, status: &StatusResponse) -> Result<ReadResponse, Error> {
+        if let Some(cvc) = &self.cvc {
+            let (eseckey, epubkey, xcvc) =
+                calc_xcvc(&self.secp, &"read".to_string(), status, cvc);
+            read_command(&self.card, self.card_nonce.clone(), Some(epubkey), Some(xcvc))
+        } else {
+            Err(Error::PcSc("Requires CVC? No impl".to_string()))
+        }
+        
+    }
+}
+
+fn find_first() -> Result<Card, Error> {
+    // Establish a PC/SC context.
+    let ctx = Context::establish(Scope::User)?;
+
+    // List available readers.
+    let mut readers_buf = [0; 2048];
+    let mut readers = ctx.list_readers(&mut readers_buf)?;
+
+    // Use the first reader.
+    let reader = match readers.next() {
+        Some(reader) => Ok(reader),
+        None => {
+            //println!("No readers are connected.");
+            Err(Error::PcSc("No readers are connected.".to_string()))
+        }
+    }?;
+    println!("Using reader: {:?}\n", reader);
+
+    // Connect to the card.
+    Ok(ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?)
 }
 
 fn rand_chaincode(rng: &mut ThreadRng) -> [u8; 32] {
