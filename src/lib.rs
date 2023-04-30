@@ -165,6 +165,70 @@ pub struct DeriveCommand {
     nonce: Vec<u8>,
 }
 
+/// nfc command to return dynamic url for NFC-enabled smart phone
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct NfcCommand {
+    cmd: String,
+}
+
+impl Default for NfcCommand {
+    fn default() -> Self {
+        Self {
+            cmd: "status".to_string(),
+        }
+    }
+}
+
+impl CommandApdu for NfcCommand {}
+
+/// Sign Command
+/// {
+//     'cmd': 'sign',              # command
+//     'slot': 0,                  # (optional) which slot's to key to use, must be unsealed.
+//     'subpath': [0, 0],          # (TAPSIGNER only) additional derivation keypath to be used
+//     'digest': (32 bytes),        # message digest to be signed
+//     'epubkey': (33 bytes),       # app's ephemeral public key
+//     'xcvc': (6 bytes)          # encrypted CVC value
+// }
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct SignCommand {
+    cmd: String,
+    slot: Option<u8>,
+    subpath: Option<[u32; 2]>, // additional keypath for TapSigner only
+    #[serde(with = "serde_bytes")]
+    digest: Vec<u8>, // message digest to be signed
+    #[serde(with = "serde_bytes")]
+    epubkey: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    xcvc: Vec<u8>,
+}
+
+impl SignCommand {
+    // pub fn for_satscard(slot: Option<u8>, digest: Vec<u8>, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
+    //     Self {
+    //         cmd: "sign".to_string(),
+    //         slot,
+    //         digest,
+    //         subpath: None,
+    //         epubkey,
+    //         xcvc,
+    //     }
+    // }
+
+    pub fn for_tapsigner(subpath: Option<[u32; 2]>, digest: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+        SignCommand {
+            cmd: "sign".to_string(),
+            slot: Some(0),
+            subpath,
+            digest,
+            epubkey: epubkey.serialize().to_vec(),
+            xcvc,
+        }
+    }
+}
+
+impl CommandApdu for SignCommand {}
+
 /// Wait Command
 ///
 /// Invalid CVC codes return error 401 (bad auth), through the third incorrect attempt. After the
@@ -363,9 +427,7 @@ impl ResponseApdu for StatusResponse {}
 
 impl StatusResponse {
     pub fn card_type(&self) -> CardType {
-        if self.addr.is_none()
-        && self.tapsigner.is_some()
-        && self.tapsigner.unwrap() == true {
+        if self.addr.is_none() && self.tapsigner.is_some() && self.tapsigner.unwrap() == true {
             CardType::TapSigner
         } else {
             CardType::SatsCard
@@ -401,6 +463,37 @@ pub struct ReadResponse {
 }
 
 impl ResponseApdu for ReadResponse {}
+
+/// nfc Response
+///
+/// URL for smart phone to navigate to
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct NfcResponse {
+    /// command result
+    pub url: String
+}
+
+impl ResponseApdu for NfcResponse {}
+
+/// Sign Response
+///
+// SATSCARD: Arbitrary signatures can be created for unsealed slots. The app could perform this, since the private key is known, but it's best if the app isn't contaminated with private key information. This could be used for both spending and multisig wallet operations.
+//
+// TAPSIGNER: This is its core feature — signing an arbitrary message digest with a tap. Once the card is set up (the key is picked), the command will always be valid.
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SignResponse {
+    /// command result
+    pub slot: u8,
+    #[serde(with = "serde_bytes")]
+    pub sig: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub pubkey: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>, 
+}
+
+impl ResponseApdu for SignResponse {}
+
 
 /// Wait Response
 ///
