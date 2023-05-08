@@ -6,7 +6,7 @@ use pcsc::{Card, Context, Protocols, Scope, ShareMode, MAX_BUFFER_SIZE};
 
 use secp256k1::{All, PublicKey, Secp256k1};
 
-struct PcscTransport {
+pub struct PcscTransport {
     secp: Secp256k1<All>,
     card: Card,
 }
@@ -132,36 +132,6 @@ impl Transport for PcscTransport {
     }
 }
 
-// struct CardReader {
-//     card: Card,
-// }
-//
-// impl CardReader {
-//     fn find_first() -> Result<CardReader, Error> {
-//         // Establish a PC/SC context.
-//         let ctx = Context::establish(Scope::User)?;
-//
-//         // List available readers.
-//         let mut readers_buf = [0; 2048];
-//         let mut readers = ctx.list_readers(&mut readers_buf)?;
-//
-//         // Use the first reader.
-//         let reader = match readers.next() {
-//             Some(reader) => Ok(reader),
-//             None => {
-//                 //println!("No readers are connected.");
-//                 Err(Error::PcSc("No readers are connected.".to_string()))
-//             }
-//         }?;
-//         println!("Using reader: {:?}\n", reader);
-//
-//         // Connect to the card.
-//         let card = ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?;
-//
-//         Ok(Self { card })
-//     }
-// }
-
 // // testing authenticated commands
 //
 // use secp256k1::ecdh::SharedSecret;
@@ -199,11 +169,3 @@ impl Transport for PcscTransport {
 // let dump_response = dump_command(&card, 0, Some(epubkey.serialize().to_vec()), Some(xcvc))?;
 // dbg!(&dump_response);
 
-// if is a TAPSIGNER call new
-// if status.addr.is_none() && status.tapsigner.is_some() && status.tapsigner.unwrap() == true {
-//     let rng = &mut rand::thread_rng();
-//     let chain_code = rand_chaincode(rng);
-//     let (eseckey, epubkey, xcvc) = calc_xcvc(&secp, &"new".to_string(), &status, &tapsigner_cvc);
-//     let new_response = new_command(&card, 0, Some(chain_code.to_vec()), epubkey.serialize().to_vec(), xcvc)?;
-//     dbg!(new_response);
-// }

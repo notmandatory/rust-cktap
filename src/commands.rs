@@ -138,18 +138,23 @@ pub struct ReadCommand {
 }
 
 impl ReadCommand {
-    // epubkey_xcvc is None for SatsCard
-    pub fn new(nonce: Vec<u8>, epubkey_xcvc: Option<(PublicKey, Vec<u8>)>) -> Self {
-        let (epubkey, xcvc) = epubkey_xcvc
-            .map(|(pk, xcvc)| (Some(pk.serialize().to_vec()), Some(xcvc)))
-            .unwrap_or((None, None));
+    pub fn for_tapsigner(nonce: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
         ReadCommand {
             cmd: "read".to_string(),
             nonce,
-            epubkey,
-            xcvc,
+            epubkey: Some(epubkey.serialize().to_vec()),
+            xcvc: Some(xcvc),
         }
     }
+
+    pub fn for_satscard(nonce: Vec<u8>) -> Self {
+        ReadCommand {
+            cmd: "read".to_string(),
+            nonce,
+            epubkey: None,
+            xcvc: None,
+        }
+    } 
 }
 
 impl CommandApdu for ReadCommand {}
@@ -400,20 +405,14 @@ impl DumpCommand {
 impl CommandApdu for DumpCommand {}
 
 // TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
-// {
-//     'cmd': 'xpub',              # command
-//     'master': (boolean),        # give master (`m`) XPUB, otherwise derived XPUB
-//     'epubkey': (33 bytes),       # app's ephemeral public key (required)
-//     'xcvc': (6 bytes)          # encrypted CVC value (required)
-// }
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct XpubCommand {
-    cmd: String,
-    master: bool,
+    cmd: String,  // always "xpub"
+    master: bool, // give master (`m`) XPUB, otherwise derived XPUB
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>,
+    epubkey: Vec<u8>, // app's ephemeral public key (required)
     #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>,
+    xcvc: Vec<u8>, //encrypted CVC value (required)
 }
 
 impl CommandApdu for XpubCommand {}

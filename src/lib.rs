@@ -19,6 +19,14 @@ pub trait Transport {
     //fn find_cards() -> Vec<CkTapCard<Self>>;
     fn secp(&self) -> &Secp256k1<All>;
     fn transmit(&self, send_buffer: Vec<u8>) -> Result<Vec<u8>, Error>;
+    fn transmit_read(&self, cmd: ReadCommand) -> Result<ReadResponse, Error> {
+        let read_apdu = cmd.apdu_bytes();
+        println!("Sending 'Read' APDU: {:?}\n", &read_apdu);
+        let rapdu = self.transmit(read_apdu)?;
+        let read_response = ReadResponse::from_cbor(rapdu.to_vec())?;
+        println!("Received 'Read' APDU: {:?}\n", &read_response);
+        Ok(read_response)
+    }
 }
 
 pub enum CkTapCard<T: Transport + Sized> {
@@ -92,8 +100,8 @@ impl<T: Transport + Sized> TapSigner<T> {
         let nonce = self.card_nonce.to_vec();
         let command = "read".to_string();
         let ekeys_xcvc = calc_ekeys_xcvc(secp, pubkey, &nonce, cvc, command);
-        let epubkey_xcvc = Some((ekeys_xcvc.1, ekeys_xcvc.2));
-        let response = read_command(&self.transport, nonce, epubkey_xcvc);
+        let read_cmd = ReadCommand::for_tapsigner(self.card_nonce.clone(), ekeys_xcvc.1, ekeys_xcvc.2);
+        let response = self.transport.transmit_read(read_cmd);
         if let Ok(read_response) = &response {
             self.card_nonce = read_response.card_nonce.clone();
         }
@@ -152,9 +160,8 @@ impl<T: Transport + Sized> SatsCard<T> {
     }
 
     pub fn read(&mut self) -> Result<ReadResponse, Error> {
-        let epubkey_xcvc = None; // Not required for SatsCard
-        let nonce = self.card_nonce.to_vec();
-        let response = read_command(&self.transport, nonce, epubkey_xcvc);
+        let read_cmd = ReadCommand::for_satscard(self.card_nonce.clone());
+        let response = self.transport.transmit_read(read_cmd);
         if let Ok(read_response) = &response {
             self.card_nonce = read_response.card_nonce.clone();
         }
@@ -220,20 +227,6 @@ fn new_command<T: Transport>(
     let new_response = NewResponse::from_cbor(rapdu.to_vec())?;
     println!("Received 'New' APDU: {:?}\n", &new_response);
     Ok(new_response)
-}
-
-fn read_command<T: Transport>(
-    transport: &T,
-    nonce: Vec<u8>,
-    epubkey_xcvc: Option<(PublicKey, Vec<u8>)>,
-) -> Result<ReadResponse, Error> {
-    // Send 'read' command.
-    let read_apdu = ReadCommand::new(nonce, epubkey_xcvc).apdu_bytes();
-    println!("Sending 'Read' APDU: {:?}\n", &read_apdu);
-    let rapdu = transport.transmit(read_apdu)?;
-    let read_response = ReadResponse::from_cbor(rapdu.to_vec())?;
-    println!("Received 'Read' APDU: {:?}\n", &read_response);
-    Ok(read_response)
 }
 
 pub fn wait_command<T: Transport>(
@@ -445,19 +438,6 @@ pub fn rand_nonce(rng: &mut ThreadRng) -> [u8; 16] {
 //     let check_response = CheckResponse::from_cbor(rapdu.to_vec())?;
 //     println!("Received 'Check' APDU: {:?}\n", &check_response);
 //     Ok(check_response)
-// }
-
-// TODO - move to satscard struct
-// pub fn read_command<T: NfcTransmitter>(
-//     card: &T,
-//     card_nonce: Vec<u8>
-// ) -> Result<ReadResponse, Error> {
-//     // Send 'read' command.
-//     let read_struct = ReadCommand::for_satscard(card_nonce);
-//     let read_apdu = read_struct.apdu_bytes();
-//     let rapdu = card.transmit(read_apdu)?;
-//     let read_response = ReadResponse::from_cbor(rapdu.to_vec())?;
-//     Ok(read_response)
 // }
 
 // fn sign_command<T: NfcTransmittor>(
