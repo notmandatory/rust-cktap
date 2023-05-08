@@ -1,7 +1,7 @@
 extern crate core;
 
 use pcsc::{Card, Context, Protocols, Scope, ShareMode, MAX_BUFFER_SIZE};
-use rust_cktap::{CardType, TapSigner, NfcTransmittor, applet_select, wait_command, read_command};
+use rust_cktap::{CardType, TapSigner, NfcTransmittor, applet_select, wait_command, read_command, SatsCard};
 use rust_cktap::commands::{AppletSelect, Error};
 
 use secp256k1::{rand, All, PublicKey, Secp256k1, SecretKey};
@@ -29,10 +29,8 @@ fn main() -> Result<(), Error> {
 
     match CardType::from_status(&status) {
         CardType::SatsCard => {
-            let rng = &mut rand::thread_rng();
-            let nonce = rand_nonce(rng).to_vec();
-            // SatsCard.read() // nonce generated in method
-            let read_response = read_command(&reader, nonce)?;
+            let mut card = SatsCard::new(reader, &status);
+            let read_response = card.read();
             dbg!(read_response);
             // TODO validate read response sig
         },

@@ -41,8 +41,6 @@ pub struct TapSigner<T: NfcTransmittor> {
 
 impl<T: NfcTransmittor> TapSigner<T> {
     pub fn new(card: T, status: &StatusResponse) -> Self {
-        // let rng = &mut rand::thread_rng();
-        // let nonce = rand_nonce(rng).to_vec();
         let card_nonce = &status.card_nonce;
         let secp: Secp256k1<All> = Secp256k1::new();
         let pubkey = if status.pubkey.len() == 33 {
@@ -160,6 +158,56 @@ impl<T: NfcTransmittor> TapSigner<T> {
     // }
 }
 
+pub struct SatsCard<T: NfcTransmittor> {
+    card: T,
+    pub pubkey: Option<PublicKey>, 
+    pub cvc: Option<String>,
+    secp: Secp256k1<All>, // required here?
+    pub card_nonce: Vec<u8>
+}
+
+impl<T: NfcTransmittor> SatsCard<T> {
+    pub fn new(card: T, status: &StatusResponse) -> Self {
+        // let rng = &mut rand::thread_rng();
+        // let nonce = rand_nonce(rng).to_vec();
+        let card_nonce = &status.card_nonce;
+        let secp: Secp256k1<All> = Secp256k1::new();
+        let pubkey = if status.pubkey.len() == 33 {
+            let as_bytes = status.pubkey.as_slice();
+            Some(PublicKey::from_slice(as_bytes).unwrap()) 
+        } else {
+            None
+        };
+        Self { 
+            card, 
+            cvc: None, 
+            card_nonce: card_nonce.to_vec(), 
+            secp,
+            pubkey
+        }
+    }
+
+    pub fn read(&mut self) -> Result<ReadResponse, Error> {
+        // let (_eseckey, epubkey, xcvc) = self.xcvc(&"read".to_string());
+        let read_cmd = ReadCommand::for_satscard(self.card_nonce.clone());
+        let read_response = self.transmit_read(read_cmd);
+        match read_response {
+            Ok(resp) => {
+                self.card_nonce = resp.card_nonce.clone();
+                Ok(resp)
+            },
+            Err(error) => panic!("Failed to read card: {:?}", error),
+        }
+    }
+
+    // TODO - generalize transmit. can be abstracted to trait for each 
+    fn transmit_read(&self, cmd: ReadCommand) -> Result<ReadResponse, Error> {
+        let read_apdu = cmd.apdu_bytes();
+        let rapdu = self.card.transmit(read_apdu)?;
+        Ok(ReadResponse::from_cbor(rapdu.to_vec())?)
+    }
+}
+
 pub fn applet_select<T: NfcTransmittor>(card: &T) -> Result<StatusResponse, Error> {
     let applet_select_apdu = AppletSelect::default().apdu_bytes();
     let rapdu = card.transmit(applet_select_apdu)?;
@@ -202,35 +250,6 @@ pub fn applet_select<T: NfcTransmittor>(card: &T) -> Result<StatusResponse, Erro
 //     let check_response = CheckResponse::from_cbor(rapdu.to_vec())?;
 //     println!("Received 'Check' APDU: {:?}\n", &check_response);
 //     Ok(check_response)
-// }
-
-
-// TODO - move to satscard struct
-pub fn read_command<T: NfcTransmittor>(
-    card: &T,
-    card_nonce: Vec<u8>
-) -> Result<ReadResponse, Error> {
-    // Send 'read' command.
-    let read_struct = ReadCommand::for_satscard(card_nonce);
-    let read_apdu = read_struct.apdu_bytes();
-    let rapdu = card.transmit(read_apdu)?;
-    let read_response = ReadResponse::from_cbor(rapdu.to_vec())?;
-    Ok(read_response)
-}
-
-// fn sign_command<T: NfcTransmittor>(
-//     card: &T,
-//     digest: Vec<u8>,
-//     epubkey: PublicKey,
-//     xcvc: Vec<u8>,
-// ) -> Result<SignResponse, Error> {
-//     let command = SignCommand::for_tapsigner(Some([0,0]), digest, epubkey, xcvc);
-//     println!("Sending SignCommand: {:?}\n", &command);
-//     let req_apdu = command.apdu_bytes();
-//     println!("Request APDU: {:?}\n", &req_apdu);
-//     let resp_apdu = card.transmit(req_apdu)?;
-//     let sign_response = SignResponse::from_cbor(resp_apdu.to_vec())?;
-//     Ok(sign_response)
 // }
 
 // fn new_command(
