@@ -2,8 +2,8 @@ use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
 use secp256k1::PublicKey;
-use serde::{Deserialize, Serialize};
 use serde;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Debug;
 
@@ -138,23 +138,18 @@ pub struct ReadCommand {
 }
 
 impl ReadCommand {
-    pub fn for_tapsigner(nonce: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    // epubkey_xcvc is None for SatsCard
+    pub fn new(nonce: Vec<u8>, epubkey_xcvc: Option<(PublicKey, Vec<u8>)>) -> Self {
+        let (epubkey, xcvc) = epubkey_xcvc
+            .map(|(pk, xcvc)| (Some(pk.serialize().to_vec()), Some(xcvc)))
+            .unwrap_or((None, None));
         ReadCommand {
             cmd: "read".to_string(),
             nonce,
-            epubkey: Some(epubkey.serialize().to_vec()),
-            xcvc: Some(xcvc),
+            epubkey,
+            xcvc,
         }
     }
-
-    pub fn for_satscard(nonce: Vec<u8>) -> Self {
-        ReadCommand {
-            cmd: "read".to_string(),
-            nonce,
-            epubkey: None,
-            xcvc: None,
-        }
-    } 
 }
 
 impl CommandApdu for ReadCommand {}
@@ -196,9 +191,11 @@ impl CommandApdu for NfcCommand {}
 pub struct SignCommand {
     cmd: String,
     slot: Option<u8>,
-    subpath: Option<[u32; 2]>, // additional keypath for TapSigner only
+    subpath: Option<[u32; 2]>,
+    // additional keypath for TapSigner only
     #[serde(with = "serde_bytes")]
-    digest: Vec<u8>, // message digest to be signed
+    digest: Vec<u8>,
+    // message digest to be signed
     #[serde(with = "serde_bytes")]
     epubkey: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -217,7 +214,12 @@ impl SignCommand {
     //     }
     // }
 
-    pub fn for_tapsigner(subpath: Option<[u32; 2]>, digest: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn for_tapsigner(
+        subpath: Option<[u32; 2]>,
+        digest: Vec<u8>,
+        epubkey: PublicKey,
+        xcvc: Vec<u8>,
+    ) -> Self {
         SignCommand {
             cmd: "sign".to_string(),
             slot: Some(0),
@@ -397,7 +399,6 @@ impl DumpCommand {
 
 impl CommandApdu for DumpCommand {}
 
-
 // TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
 // {
 //     'cmd': 'xpub',              # command
@@ -412,7 +413,7 @@ pub struct XpubCommand {
     #[serde(with = "serde_bytes")]
     epubkey: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>
+    xcvc: Vec<u8>,
 }
 
 impl CommandApdu for XpubCommand {}
@@ -423,11 +424,10 @@ impl XpubCommand {
             cmd: "xpub".to_string(),
             master,
             epubkey: epubkey.serialize().to_vec(),
-            xcvc
+            xcvc,
         }
     }
 }
-
 
 // Responses
 
@@ -512,7 +512,7 @@ impl fmt::Debug for ReadResponse {
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcResponse {
     /// command result
-    pub url: String
+    pub url: String,
 }
 
 impl ResponseApdu for NfcResponse {}
@@ -531,7 +531,7 @@ pub struct SignResponse {
     #[serde(with = "serde_bytes")]
     pub pubkey: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>, 
+    pub card_nonce: Vec<u8>,
 }
 
 impl ResponseApdu for SignResponse {}
@@ -546,7 +546,6 @@ impl fmt::Debug for SignResponse {
             .finish()
     }
 }
-
 
 /// Wait Response
 ///
@@ -571,6 +570,7 @@ pub struct CertsResponse {
     /// list of certificates, from 'batch' to 'root'
     cert_chain: Vec<Value>,
 }
+
 impl ResponseApdu for CertsResponse {}
 
 impl CertsResponse {
@@ -635,10 +635,10 @@ impl ResponseApdu for CheckResponse {}
 #[derive(Deserialize, Clone, Debug)]
 pub struct NewResponse {
     /// slot just made
-    slot: usize,
+    pub slot: usize,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    card_nonce: Vec<u8>,
+    pub card_nonce: Vec<u8>,
 }
 
 impl ResponseApdu for NewResponse {}
@@ -685,7 +685,6 @@ pub struct DumpResponse {
 }
 
 impl ResponseApdu for DumpResponse {}
-
 
 #[derive(Deserialize, Clone)]
 pub struct XpubResponse {
