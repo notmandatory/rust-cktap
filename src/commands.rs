@@ -1,13 +1,12 @@
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
+use secp256k1::hashes::hex::ToHex;
 use secp256k1::PublicKey;
 use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-
-use hex::encode;
 
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
@@ -573,9 +572,9 @@ impl ResponseApdu for ReadResponse {}
 impl Debug for ReadResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("ReadResponse")
-            .field("sig", &encode(&self.sig))
-            .field("pubkey", &encode(&self.pubkey))
-            .field("card_nonce", &encode(&self.card_nonce))
+            .field("sig", &self.sig.to_hex())
+            .field("pubkey", &self.pubkey.to_hex())
+            .field("card_nonce", &self.card_nonce.to_hex())
             .finish()
     }
 }
@@ -614,9 +613,9 @@ impl Debug for SignResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("SignResponse")
             .field("slot", &self.slot)
-            .field("sig", &encode(&self.sig))
-            .field("pubkey", &encode(&self.pubkey))
-            .field("card_nonce", &encode(&self.card_nonce))
+            .field("sig", &self.sig.to_hex())
+            .field("pubkey", &self.pubkey.to_hex())
+            .field("card_nonce", &self.card_nonce.to_hex())
             .finish()
     }
 }
@@ -799,8 +798,8 @@ impl ResponseApdu for XpubResponse {}
 impl Debug for XpubResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("XpubResponse")
-            .field("xpub", &encode(&self.xpub))
-            .field("card_nonce", &encode(&self.card_nonce))
+            .field("xpub", &self.xpub.to_hex())
+            .field("card_nonce", &self.card_nonce.to_hex())
             .finish()
     }
 }
