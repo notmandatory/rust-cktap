@@ -5,7 +5,7 @@ use secp256k1::PublicKey;
 use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 use hex::encode;
 
@@ -32,7 +32,7 @@ pub enum Error {
 
 impl<T> From<ciborium::de::Error<T>> for Error
 where
-    T: core::fmt::Debug,
+    T: Debug,
 {
     fn from(e: ciborium::de::Error<T>) -> Self {
         Error::CiborDe(e.to_string())
@@ -55,9 +55,10 @@ impl From<pcsc::Error> for Error {
 // Apdu Traits
 
 pub trait CommandApdu {
+    fn name() -> String;
     fn apdu_bytes(&self) -> Vec<u8>
     where
-        Self: serde::Serialize,
+        Self: serde::Serialize + Debug,
     {
         let mut command = Vec::new();
         into_writer(&self, &mut command).unwrap();
@@ -95,6 +96,9 @@ fn build_apdu(header: &[u8], command: &[u8]) -> Vec<u8> {
 pub struct AppletSelect {}
 
 impl CommandApdu for AppletSelect {
+    fn name() -> String {
+        String::default()
+    }
     fn apdu_bytes(&self) -> Vec<u8> {
         build_apdu(&SELECT_CLA_INS_P1P2, &APP_ID)
     }
@@ -110,13 +114,15 @@ pub struct StatusCommand {
 
 impl Default for StatusCommand {
     fn default() -> Self {
-        StatusCommand {
-            cmd: "status".to_string(),
-        }
+        StatusCommand { cmd: Self::name() }
     }
 }
 
-impl CommandApdu for StatusCommand {}
+impl CommandApdu for StatusCommand {
+    fn name() -> String {
+        "status".to_string()
+    }
+}
 
 /// Read Command
 ///
@@ -140,7 +146,7 @@ pub struct ReadCommand {
 impl ReadCommand {
     pub fn for_tapsigner(nonce: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
         ReadCommand {
-            cmd: "read".to_string(),
+            cmd: Self::name(),
             nonce,
             epubkey: Some(epubkey.serialize().to_vec()),
             xcvc: Some(xcvc),
@@ -149,15 +155,19 @@ impl ReadCommand {
 
     pub fn for_satscard(nonce: Vec<u8>) -> Self {
         ReadCommand {
-            cmd: "read".to_string(),
+            cmd: Self::name(),
             nonce,
             epubkey: None,
             xcvc: None,
         }
-    } 
+    }
 }
 
-impl CommandApdu for ReadCommand {}
+impl CommandApdu for ReadCommand {
+    fn name() -> String {
+        "read".to_string()
+    }
+}
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DeriveCommand {
@@ -175,16 +185,18 @@ pub struct NfcCommand {
 
 impl Default for NfcCommand {
     fn default() -> Self {
-        Self {
-            cmd: "nfc".to_string(),
-        }
+        Self { cmd: Self::name() }
     }
 }
 
-impl CommandApdu for NfcCommand {}
+impl CommandApdu for NfcCommand {
+    fn name() -> String {
+        "nfc".to_string()
+    }
+}
 
 /// Sign Command
-/// {
+// {
 //     'cmd': 'sign',              # command
 //     'slot': 0,                  # (optional) which slot's to key to use, must be unsealed.
 //     'subpath': [0, 0],          # (TAPSIGNER only) additional derivation keypath to be used
@@ -225,8 +237,10 @@ impl SignCommand {
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
+        let cmd = Self::name();
+
         SignCommand {
-            cmd: "sign".to_string(),
+            cmd,
             slot: Some(0),
             subpath,
             digest,
@@ -236,7 +250,11 @@ impl SignCommand {
     }
 }
 
-impl CommandApdu for SignCommand {}
+impl CommandApdu for SignCommand {
+    fn name() -> String {
+        "sign".to_string()
+    }
+}
 
 /// Wait Command
 ///
@@ -263,14 +281,18 @@ pub struct WaitCommand {
 impl WaitCommand {
     pub fn new(epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
         WaitCommand {
-            cmd: "wait".to_string(),
+            cmd: Self::name(),
             epubkey,
             xcvc,
         }
     }
 }
 
-impl CommandApdu for WaitCommand {}
+impl CommandApdu for WaitCommand {
+    fn name() -> String {
+        "wait".to_string()
+    }
+}
 
 /// Certs Command
 ///
@@ -284,13 +306,15 @@ pub struct CertsCommand {
 
 impl Default for CertsCommand {
     fn default() -> Self {
-        CertsCommand {
-            cmd: "certs".to_string(),
-        }
+        CertsCommand { cmd: Self::name() }
     }
 }
 
-impl CommandApdu for CertsCommand {}
+impl CommandApdu for CertsCommand {
+    fn name() -> String {
+        "certs".to_string()
+    }
+}
 
 /// Check Command
 ///
@@ -308,13 +332,17 @@ pub struct CheckCommand {
 impl CheckCommand {
     pub fn new(nonce: Vec<u8>) -> Self {
         CheckCommand {
-            cmd: "check".to_string(),
+            cmd: Self::name(),
             nonce,
         }
     }
 }
 
-impl CommandApdu for CheckCommand {}
+impl CommandApdu for CheckCommand {
+    fn name() -> String {
+        "check".to_string()
+    }
+}
 
 /// New Command
 ///
@@ -353,7 +381,7 @@ pub struct NewCommand {
 impl NewCommand {
     pub fn new(slot: usize, chain_code: Option<Vec<u8>>, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
         NewCommand {
-            cmd: "new".to_string(),
+            cmd: Self::name(),
             slot,
             chain_code,
             epubkey,
@@ -362,7 +390,46 @@ impl NewCommand {
     }
 }
 
-impl CommandApdu for NewCommand {}
+impl CommandApdu for NewCommand {
+    fn name() -> String {
+        "new".to_string()
+    }
+}
+
+/// Unseal Command
+///
+/// Unseal the current slot.
+/// NOTE: The slot number is included in the request to prevent command replay. Only the current slot can be unsealed.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct UnsealCommand {
+    /// 'unseal' command
+    cmd: String,
+    /// slot to be unsealed, must equal currently-active slot number
+    slot: usize,
+    /// app's ephemeral public key, 33 bytes
+    #[serde(with = "serde_bytes")]
+    epubkey: Vec<u8>,
+    /// encrypted CVC value, 6 bytes
+    #[serde(with = "serde_bytes")]
+    xcvc: Vec<u8>,
+}
+
+impl UnsealCommand {
+    pub fn new(slot: usize, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
+        UnsealCommand {
+            cmd: Self::name(),
+            slot,
+            epubkey,
+            xcvc,
+        }
+    }
+}
+
+impl CommandApdu for UnsealCommand {
+    fn name() -> String {
+        "unseal".to_string()
+    }
+}
 
 /// Dump Command
 ///
@@ -394,7 +461,7 @@ pub struct DumpCommand {
 impl DumpCommand {
     pub fn new(slot: usize, epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
         DumpCommand {
-            cmd: "dump".to_string(),
+            cmd: Self::name(),
             slot,
             epubkey,
             xcvc,
@@ -402,7 +469,11 @@ impl DumpCommand {
     }
 }
 
-impl CommandApdu for DumpCommand {}
+impl CommandApdu for DumpCommand {
+    fn name() -> String {
+        "dump".to_string()
+    }
+}
 
 // TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -415,12 +486,16 @@ pub struct XpubCommand {
     xcvc: Vec<u8>, //encrypted CVC value (required)
 }
 
-impl CommandApdu for XpubCommand {}
+impl CommandApdu for XpubCommand {
+    fn name() -> String {
+        "xpub".to_string()
+    }
+}
 
 impl XpubCommand {
     pub fn new(master: bool, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
         Self {
-            cmd: "xpub".to_string(),
+            cmd: Self::name(),
             master,
             epubkey: epubkey.serialize().to_vec(),
             xcvc,
@@ -458,8 +533,8 @@ pub struct StatusResponse {
 
 impl ResponseApdu for StatusResponse {}
 
-// impl std::fmt::Display for StatusResponse {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+// impl Display for StatusResponse {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
 //         write!(f, "Name: {}, Age: {}", self.name, self.age)
 //     }
 // }
@@ -495,8 +570,8 @@ pub struct ReadResponse {
 
 impl ResponseApdu for ReadResponse {}
 
-impl fmt::Debug for ReadResponse {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Debug for ReadResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("ReadResponse")
             .field("sig", &encode(&self.sig))
             .field("pubkey", &encode(&self.pubkey))
@@ -535,8 +610,8 @@ pub struct SignResponse {
 
 impl ResponseApdu for SignResponse {}
 
-impl fmt::Debug for SignResponse {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Debug for SignResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("SignResponse")
             .field("slot", &self.slot)
             .field("sig", &encode(&self.sig))
@@ -567,6 +642,7 @@ impl ResponseApdu for WaitResponse {}
 #[derive(Deserialize, Clone, Debug)]
 pub struct CertsResponse {
     /// list of certificates, from 'batch' to 'root'
+    // TODO create custom deserializer like "serde_bytes" but for Vec<Vec<u8>>
     cert_chain: Vec<Value>,
 }
 
@@ -611,10 +687,10 @@ impl CertsResponse {
 pub struct CheckResponse {
     /// signature using card_pubkey, 64 bytes
     #[serde(with = "serde_bytes")]
-    auth_sig: Vec<u8>,
+    pub auth_sig: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    card_nonce: Vec<u8>,
+    pub card_nonce: Vec<u8>,
 }
 
 impl ResponseApdu for CheckResponse {}
@@ -642,6 +718,31 @@ pub struct NewResponse {
 
 impl ResponseApdu for NewResponse {}
 
+/// Unseal Response
+#[derive(Deserialize, Clone, Debug)]
+pub struct UnsealResponse {
+    /// slot just unsealed
+    pub slot: usize,
+    /// private key for spending (for addr), 32 bytes
+    /// The private keys are encrypted, XORed with the session key
+    #[serde(with = "serde_bytes")]
+    pub privkey: Vec<u8>,
+    /// slot's pubkey (convenience, since could be calc'd from privkey), 33 bytes
+    #[serde(with = "serde_bytes")]
+    pub pubkey: Vec<u8>,
+    /// card's master private key, 32 bytes
+    #[serde(with = "serde_bytes")]
+    pub master_pk: Vec<u8>,
+    /// nonce provided by customer
+    #[serde(with = "serde_bytes")]
+    pub chain_code: Vec<u8>,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for UnsealResponse {}
+
 /// Dump Response
 ///
 /// Without the CVC, the dump command returns just the sealed/unsealed/unused status for each slot,
@@ -649,38 +750,38 @@ impl ResponseApdu for NewResponse {}
 #[derive(Deserialize, Clone, Debug)]
 pub struct DumpResponse {
     /// slot just made
-    slot: usize,
+    pub slot: usize,
     /// private key for spending (for addr), 32 bytes
     /// The private keys are encrypted, XORed with the session key
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    privkey: Option<Vec<u8>>,
+    pub privkey: Option<Vec<u8>>,
     /// public key, 33 bytes
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pubkey: Vec<u8>,
+    pub pubkey: Vec<u8>,
     /// nonce provided by customer originally
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    chain_code: Option<Vec<u8>>,
+    pub chain_code: Option<Vec<u8>>,
     /// master private key for this slot (was picked by card), 32 bytes
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    master_pk: Option<Vec<u8>>,
+    pub master_pk: Option<Vec<u8>>,
     /// flag that slots unsealed for unusual reasons (absent if false)
     #[serde(default)]
-    tampered: Option<bool>,
+    pub tampered: Option<bool>,
     /// if no xcvc provided, slot used status
     #[serde(default)]
-    used: Option<bool>,
+    pub used: Option<bool>,
     /// if no xcvc provided, slot sealed status
-    sealed: Option<bool>,
+    pub sealed: Option<bool>,
     /// if no xcvc provided, full payment address (not censored)
     #[serde(default)]
-    addr: Option<String>,
+    pub addr: Option<String>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    card_nonce: Vec<u8>,
+    pub card_nonce: Vec<u8>,
 }
 
 impl ResponseApdu for DumpResponse {}
@@ -695,53 +796,11 @@ pub struct XpubResponse {
 
 impl ResponseApdu for XpubResponse {}
 
-impl fmt::Debug for XpubResponse {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Debug for XpubResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("XpubResponse")
             .field("xpub", &encode(&self.xpub))
             .field("card_nonce", &encode(&self.card_nonce))
             .finish()
     }
 }
-
-// Response for a used slot with XCVC provided:
-//
-// {
-//     'slot': 0,                     # which slot is being dumped
-//     'privkey': (32 bytes),         # private key for spending (for addr)
-//     'pubkey': (33 bytes),          # public key
-//     'chain_code': (32 bytes),      # nonce provided by customer originally
-//     'master_pk': (32 bytes),       # master private key for this slot (was picked by card)
-//     'tampered': (bool),            # flag that slots unsealed for unusual reasons (absent if false)
-//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
-// }
-//
-// The private keys are encrypted, XORed with the session key, but the other values are shared unencrypted.
-//
-// The tampered field is only present (and True) if the slot was unsealed due to confusion or uncertainty about its status. In other words, if the card unsealed itself rather than via a successful unseal command.
-//
-// If the XCVC (and/or epubkey) is not provided, then the response contains the full payment address and indicates it is unsealed. In version 1.0.3 and later, the full compressed pubkey for the payment address is also provided.
-//
-// {
-//     'slot': 0,                     # which slot is being dumped
-//     'sealed': False,
-//     'addr': 'bc1qsqkhv..qf735wvl3lh8',   # full payment address (not censored)
-//     'pubkey': (33 bytes),          # public key corresponding to payment address (since v1.0.3)
-//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
-// }
-//
-// The response for an unused slot (no CVC provided):
-//
-// {
-//     'slot': 2,                     # which slot is being dumped
-//     'used': False,
-//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
-// }
-//
-// For the currently active slot, the response is (no CVC provided):
-//
-// {
-//     'slot': 3,                     # which slot is being dumped
-//     'sealed': True,
-//     'card_nonce': (16 bytes)       # new nonce value, for NEXT command (not this one)
-// }
