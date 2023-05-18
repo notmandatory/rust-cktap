@@ -1,8 +1,8 @@
 extern crate core;
 
 use rust_cktap::commands::Error;
-use rust_cktap::pcsc::PcscTransport;
-use rust_cktap::{rand_chaincode, CkTapCard, SharedCommands, Transport};
+use rust_cktap::rand_nonce;
+use rust_cktap::{pcsc::PcscTransport, rand_chaincode, CkTapCard, SharedCommands, Transport};
 use secp256k1::rand;
 use std::io;
 use std::io::Write;
@@ -20,8 +20,12 @@ fn main() -> Result<(), Error> {
     let card = PcscTransport::find_first()?;
     dbg!(&card);
 
+    let rng = &mut rand::thread_rng();
+
     match card {
         CkTapCard::TapSigner(mut card) => {
+            let cvc: String = get_cvc();
+
             // if auth delay call wait
             while card.auth_delay.is_some() {
                 dbg!(card.auth_delay.unwrap());
@@ -30,21 +34,29 @@ fn main() -> Result<(), Error> {
 
             // only do this once per card!
             if card.path.is_none() {
-                let rng = &mut rand::thread_rng();
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = card.init(chain_code, get_cvc())?;
+                let new_result = card.init(chain_code, cvc.clone())?;
                 dbg!(new_result);
             }
+
+            let nonce = rand_nonce(rng);
+            card.certs_check(cvc.clone(), nonce.to_vec());
 
             //let dump_result = card.dump();
 
-            let read_result = card.read(get_cvc())?;
-            dbg!(read_result);
+            // let read_result = card.read(cvc.clone())?;
+            // dbg!(read_result);
 
-            let nfc_result = card.nfc()?;
-            dbg!(nfc_result);
+            // let path = vec![2147483732, 2147483648, 2147483648];
+            // let derive_result = card.derive(path, cvc.clone())?;
+            // dbg!(&derive_result);
+
+            // let nfc_result = card.nfc()?;
+            // dbg!(nfc_result);
         }
         CkTapCard::SatsChip(mut card) => {
+            let cvc: String = get_cvc();
+
             // if auth delay call wait
             while card.auth_delay.is_some() {
                 dbg!(card.auth_delay.unwrap());
@@ -53,13 +65,12 @@ fn main() -> Result<(), Error> {
 
             // only do this once per card!
             if card.path.is_none() {
-                let rng = &mut rand::thread_rng();
                 let chain_code = rand_chaincode(rng).to_vec();
                 let new_result = card.init(chain_code, get_cvc())?;
                 dbg!(new_result);
             }
 
-            let read_result = card.read(get_cvc())?;
+            let read_result = card.read(cvc.clone())?;
             dbg!(read_result);
 
             let nfc_result = card.nfc()?;
@@ -73,8 +84,13 @@ fn main() -> Result<(), Error> {
                 dbg!(wait_response);
             }
 
-            // let read_result = card.read()?;
-            // dbg!(read_result);
+            let read_result = card.read()?;
+            dbg!(read_result);
+
+            let derive_result = card.derive()?;
+            dbg!(&derive_result);
+
+
 
             // let nfc_result = card.nfc()?;
             // dbg!(nfc_result);
@@ -82,7 +98,6 @@ fn main() -> Result<(), Error> {
             // if let Some(slot) = card.slots.first() {
             //     if slot == &0 {
             //         // TODO must unseal first
-            //         let rng = &mut rand::thread_rng();
             //         let chain_code = rand_chaincode(rng).to_vec();
             //         let new_result = card.new_slot(0, chain_code, get_cvc())?;
             //     }
@@ -97,8 +112,8 @@ fn main() -> Result<(), Error> {
             // let dump_result = card.dump(0, None)?;
             // dbg!(dump_result);
 
-            let dump_result = card.dump(0, Some(get_cvc()))?;
-            dbg!(dump_result);
+            // let dump_result = card.dump(0, Some(get_cvc()))?;
+            // dbg!(dump_result);
         }
     }
 

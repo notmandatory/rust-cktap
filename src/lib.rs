@@ -1,8 +1,10 @@
 use secp256k1::ecdh::SharedSecret;
+use secp256k1::ecdsa::Signature;
+use secp256k1::hashes::hex::ToHex;
 use secp256k1::hashes::{sha256, Hash};
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
-use secp256k1::{rand, All, PublicKey, Secp256k1, SecretKey};
+use secp256k1::{rand, All, PublicKey, Secp256k1, SecretKey, Message};
 use std::fmt;
 use std::fmt::Debug;
 
@@ -132,6 +134,77 @@ impl<T: Transport + Sized> TapSigner<T> {
         }
         read_response
     }
+
+    pub fn certs_check(&mut self, cvc: String, nonce: Vec<u8>) -> Result<(), Error> {
+        let certs_cmd = CertsCommand::default();
+        let certs_response: CertsResponse = self.transport.transmit(certs_cmd)?;
+        dbg!(&certs_response);
+
+        // let nonce = rand_nonce().to_vec();
+        let check_cmd = CheckCommand::new(nonce.clone());
+        let check_response: Result<CheckResponse, Error> = self.transport.transmit(check_cmd);
+        dbg!(&check_response);
+
+        if let Ok(response) = &check_response {
+            self.card_nonce = response.card_nonce.clone();
+        }
+
+        // let slot_pubkey = match self.ver == "0.9.0".to_string() {
+        //     true => None,
+        //     false => Some("adsjhfklajdh")
+        // };
+        // digest:
+        // b'OPENDIME' (8 bytes)
+        // (card_nonce - 16 bytes)
+        // (nonce from check command - 16 bytes)
+        // SatsCard 1.0.0+: (pubkey of current sealed slot - 33 bytes)
+
+        // Tapsigners current pubkey
+        // Todo: verify signature return by read command
+        let current_pubkey = &self.read(cvc).unwrap().pubkey;
+
+        let card_pubkey = &self.pubkey;
+        let card_nonce = &self.card_nonce;
+        let app_nonce = &nonce;
+
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend("OPENDIME".as_bytes());
+        message_bytes.extend(card_nonce);
+        message_bytes.extend(app_nonce);
+        //     assert len(msg) == 8 + CARD_NONCE_SIZE + USER_NONCE_SIZE
+        message_bytes.extend(current_pubkey);
+
+        let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
+        let signature = Signature::from_str(&check_response.unwrap().auth_sig.to_hex()).unwrap();
+        // todo: get from card 
+        use std::str::FromStr;
+        assert!(self.secp.verify_ecdsa(&message, &signature, card_pubkey).is_ok()); 
+        
+        Ok(())
+    }
+
+    pub fn derive(&mut self, path: Vec<usize>, cvc: String) -> Result<DeriveResponse, Error> {
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &DeriveCommand::name());
+        let cmd = DeriveCommand::for_tapsigner(
+            self.card_nonce.clone(),
+            path, 
+            epubkey, 
+            xcvc
+        );
+        let resp: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
+        if let Ok(derive_resp) = &resp {
+            self.card_nonce = derive_resp.card_nonce.clone();
+
+            // TODO: verify reponse
+            // The digest:
+                // b'OPENDIME' (8 bytes)    
+                // (card_nonce - 16 bytes)
+                // (nonce from command - 16 bytes)
+                // (chain_code - 32 bytes)
+            // must be signed by the master_pubkey
+        }
+        resp
+    }
 }
 
 pub struct SatsCard<T: Transport + Sized> {
@@ -140,7 +213,7 @@ pub struct SatsCard<T: Transport + Sized> {
     pub proto: usize,
     pub ver: String,
     pub birth: usize,
-    pub slots: Vec<usize>,
+    pub slots: (usize, usize),
     pub addr: Option<String>,
     pub pubkey: PublicKey,
     pub card_nonce: Vec<u8>, // 16 bytes
@@ -200,6 +273,23 @@ impl<T: Transport + Sized> SatsCard<T> {
             self.card_nonce = read_response.card_nonce.clone();
         }
         response
+    }
+
+    pub fn derive(&mut self) -> Result<DeriveResponse, Error> {
+        let cmd = DeriveCommand::for_satscard(self.card_nonce.clone());
+        let resp: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
+        if let Ok(derive_resp) = &resp {
+            self.card_nonce = derive_resp.card_nonce.clone();
+
+            // TODO: verify reponse
+            // The digest:
+                // b'OPENDIME' (8 bytes)    
+                // (card_nonce - 16 bytes)
+                // (nonce from command - 16 bytes)
+                // (chain_code - 32 bytes)
+            // must be signed by the master_pubkey
+        }
+        resp
     }
 
     pub fn unseal(&self, slot: usize, cvc: String) -> Result<UnsealResponse, Error> {

@@ -51,8 +51,13 @@ impl From<pcsc::Error> for Error {
     }
 }
 
-// Apdu Traits
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ErrorResponse {
+    pub error: String,
+    pub code: usize,
+}
 
+// Apdu Traits
 pub trait CommandApdu {
     fn name() -> String;
     fn apdu_bytes(&self) -> Vec<u8>
@@ -123,6 +128,28 @@ impl CommandApdu for StatusCommand {
     }
 }
 
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct StatusResponse {
+    pub proto: usize,
+    pub ver: String,
+    pub birth: usize,
+    pub slots: Option<(usize, usize)>,
+    pub addr: Option<String>,
+    pub tapsigner: Option<bool>,
+    pub satschip: Option<bool>,
+    pub path: Option<Vec<usize>>,
+    pub num_backups: Option<usize>,
+    #[serde(with = "serde_bytes")]
+    pub pubkey: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+    pub testnet: Option<bool>,
+    #[serde(default)]
+    pub auth_delay: Option<usize>,
+}
+
+impl ResponseApdu for StatusResponse {}
+
 /// Read Command
 ///
 /// Apps need to write a CBOR message to read a SATSCARD's current payment address, or a
@@ -168,13 +195,231 @@ impl CommandApdu for ReadCommand {
     }
 }
 
+/// Read Response
+///
+/// The signature is created from the digest (SHA-256) of these bytes:
+///
+/// b'OPENDIME' (8 bytes)
+/// (card_nonce - 16 bytes)
+/// (nonce from read command - 16 bytes)
+/// (slot - 1 byte)
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct ReadResponse {
+    /// signature over a bunch of fields using private key of slot, 64 bytes
+    #[serde(with = "serde_bytes")]
+    pub sig: Vec<u8>,
+    /// public key for this slot/derivation, 33 bytes
+    #[serde(with = "serde_bytes")]
+    pub pubkey: Vec<u8>,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for ReadResponse {}
+
+impl Debug for ReadResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("ReadResponse")
+            .field("sig", &self.sig.to_hex())
+            .field("pubkey", &self.pubkey.to_hex())
+            .field("card_nonce", &self.card_nonce.to_hex())
+            .finish()
+    }
+}
+
+// impl ReadResponse {
+//     pub fn pubkey(&self) -> PublicKey {
+//         PublicKey::from_slice(self.pubkey.as_slice()).unwrap()
+//     }
+// }
+
+// Checks payment address derivation: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#satscard-checks-payment-address-derivation
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DeriveCommand {
     cmd: String,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
+    path: Option<Vec<usize>>,
+    #[serde(with = "serde_bytes")]
+    epubkey: Option<Vec<u8>>,
+    #[serde(with = "serde_bytes")]
+    xcvc: Option<Vec<u8>>, 
 }
+
+impl CommandApdu for DeriveCommand {
+    fn name() -> String {
+        "derive".to_string()
+    }
+}
+
+impl DeriveCommand {
+    pub fn for_satscard(nonce: Vec<u8>) -> Self {
+        DeriveCommand {
+            cmd: Self::name(),
+            nonce,
+            path: None,
+            epubkey: None,
+            xcvc: None,
+        }
+    }
+
+    pub fn for_tapsigner(
+        nonce: Vec<u8>, 
+        path: Vec<usize>, 
+        epubkey: PublicKey, 
+        xcvc: Vec<u8>
+    ) -> Self {
+        DeriveCommand {
+            cmd: Self::name(),
+            nonce,
+            path: Some(path),
+            epubkey: Some(epubkey.serialize().to_vec()),
+            xcvc: Some(xcvc),
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct DeriveResponse {
+    #[serde(with = "serde_bytes")]
+    pub sig: Vec<u8>, // 64 byes
+    #[serde(with = "serde_bytes")]
+    pub chain_code: Vec<u8>, // 32 bytes
+    #[serde(with = "serde_bytes")]
+    pub master_pubkey: Vec<u8>, // 33 bytes
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>, // 16 bytes
+}
+
+impl ResponseApdu for DeriveResponse {}
+
+impl Debug for DeriveResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("DeriveResponse")
+            .field("sig", &self.sig.to_hex())
+            .field("chain_code", &self.chain_code.to_hex())
+            .field("master_pubkey", &self.master_pubkey.to_hex())
+            .field("card_nonce", &self.card_nonce.to_hex())
+            .finish()
+    }
+}
+
+/// Certs Command
+///
+/// This command is used to verify the card was made by Coinkite and is not counterfeit. Two
+/// requests are needed: first, fetch the certificates, and then provide a nonce to be signed.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CertsCommand {
+    /// 'certs' command
+    cmd: String,
+}
+
+impl CommandApdu for CertsCommand {
+    fn name() -> String {
+        "certs".to_string()
+    }
+}
+
+impl Default for CertsCommand {
+    fn default() -> Self {
+        CertsCommand { cmd: Self::name() }
+    }
+}
+
+/// The response is static for any particular card. The values are captured during factory setup.
+/// Each entry in the list is a 65-byte signature. The first signature signs the card's public key,
+/// and each following signature signs the public key used in the previous signature. Although two
+/// levels of signatures are planned, more are possible.
+#[derive(Deserialize, Clone)]
+pub struct CertsResponse {
+    /// list of certificates, from 'batch' to 'root'
+    // TODO create custom deserializer like "serde_bytes" but for Vec<Vec<u8>>
+    cert_chain: Vec<Value>,
+}
+
+impl ResponseApdu for CertsResponse {}
+
+impl CertsResponse {
+    pub fn cert_chain(&self) -> Vec<Vec<u8>> {
+        self.clone()
+            .cert_chain
+            .into_iter()
+            .filter_map(|v| match v {
+                Value::Bytes(bv) => Some(bv),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+impl Debug for CertsResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let cert_hexes: Vec<String> = self.cert_chain().iter().map(|key| key.to_hex()).collect();
+        f.debug_struct("CertsResponse")
+            .field("cert_chain", &cert_hexes)
+            .finish()
+    }
+}
+
+/// Check Command
+///
+/// This command is used to verify the card was made by Coinkite and is not counterfeit. Two
+/// requests are needed: first, fetch the certificates (i.e CertsCommand), and then provide a nonce to be signed.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CheckCommand {
+    /// 'check' command
+    cmd: String,
+    /// random value from app, 16 bytes
+    #[serde(with = "serde_bytes")]
+    nonce: Vec<u8>,
+}
+
+impl CommandApdu for CheckCommand {
+    fn name() -> String {
+        "check".to_string()
+    }
+}
+
+impl CheckCommand {
+    pub fn new(nonce: Vec<u8>) -> Self {
+        CheckCommand {
+            cmd: Self::name(),
+            nonce,
+        }
+    }
+}
+
+/// Check Certs Response
+/// ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#certs
+#[derive(Deserialize, Clone)]
+pub struct CheckResponse {
+    /// signature using card_pubkey, 64 bytes
+    #[serde(with = "serde_bytes")]
+    pub auth_sig: Vec<u8>,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for CheckResponse {}
+
+impl Debug for CheckResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("CheckResponse")
+            .field("auth_sig", &self.auth_sig.to_hex())
+            .field("card_nonce", &self.card_nonce.to_hex())
+            .finish()
+    }
+}
+
+
+
+
+
+
+
 
 /// nfc command to return dynamic url for NFC-enabled smart phone
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -290,56 +535,6 @@ impl WaitCommand {
 impl CommandApdu for WaitCommand {
     fn name() -> String {
         "wait".to_string()
-    }
-}
-
-/// Certs Command
-///
-/// This command is used to verify the card was made by Coinkite and is not counterfeit. Two
-/// requests are needed: first, fetch the certificates, and then provide a nonce to be signed.
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct CertsCommand {
-    /// 'certs' command
-    cmd: String,
-}
-
-impl Default for CertsCommand {
-    fn default() -> Self {
-        CertsCommand { cmd: Self::name() }
-    }
-}
-
-impl CommandApdu for CertsCommand {
-    fn name() -> String {
-        "certs".to_string()
-    }
-}
-
-/// Check Command
-///
-/// This command is used to verify the card was made by Coinkite and is not counterfeit. Two
-/// requests are needed: first, fetch the certificates, and then provide a nonce to be signed.
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct CheckCommand {
-    /// 'check' command
-    cmd: String,
-    /// random value from app, 16 bytes
-    #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
-}
-
-impl CheckCommand {
-    pub fn new(nonce: Vec<u8>) -> Self {
-        CheckCommand {
-            cmd: Self::name(),
-            nonce,
-        }
-    }
-}
-
-impl CommandApdu for CheckCommand {
-    fn name() -> String {
-        "check".to_string()
     }
 }
 
@@ -504,80 +699,11 @@ impl XpubCommand {
 
 // Responses
 
-#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ErrorResponse {
-    pub error: String,
-    pub code: usize,
-}
-
-#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct StatusResponse {
-    pub proto: usize,
-    pub ver: String,
-    pub birth: usize,
-    pub slots: Option<Vec<usize>>,
-    pub addr: Option<String>,
-    pub tapsigner: Option<bool>,
-    pub satschip: Option<bool>,
-    pub path: Option<Vec<usize>>,
-    pub num_backups: Option<usize>,
-    #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-    pub testnet: Option<bool>,
-    #[serde(default)]
-    pub auth_delay: Option<usize>,
-}
-
-impl ResponseApdu for StatusResponse {}
-
 // impl Display for StatusResponse {
 //     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
 //         write!(f, "Name: {}, Age: {}", self.name, self.age)
 //     }
 // }
-
-/// Read Response
-///
-/// The signature is created from the digest (SHA-256) of these bytes:
-///
-/// b'OPENDIME' (8 bytes)
-/// (card_nonce - 16 bytes)
-/// (nonce from read command - 16 bytes)
-/// (slot - 1 byte)
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct ReadResponse {
-    /// signature over a bunch of fields using private key of slot, 64 bytes
-    #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>,
-    /// public key for this slot/derivation, 33 bytes
-    #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
-    /// new nonce value, for NEXT command (not this one), 16 bytes
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-}
-
-// fn serialize_hex_vec<S>(value: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
-// where
-//     S: serde::Serializer,
-// {
-//     let hex_str = value.iter().map(|b| format!("{:02X}", b)).collect::<String>();
-//     serializer.serialize_str(&hex_str)
-// }
-
-impl ResponseApdu for ReadResponse {}
-
-impl Debug for ReadResponse {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.debug_struct("ReadResponse")
-            .field("sig", &self.sig.to_hex())
-            .field("pubkey", &self.pubkey.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
-            .finish()
-    }
-}
 
 /// nfc Response
 ///
@@ -633,66 +759,6 @@ pub struct WaitResponse {
 }
 
 impl ResponseApdu for WaitResponse {}
-
-/// The response is static for any particular card. The values are captured during factory setup.
-/// Each entry in the list is a 65-byte signature. The first signature signs the card's public key,
-/// and each following signature signs the public key used in the previous signature. Although two
-/// levels of signatures are planned, more are possible.
-#[derive(Deserialize, Clone, Debug)]
-pub struct CertsResponse {
-    /// list of certificates, from 'batch' to 'root'
-    // TODO create custom deserializer like "serde_bytes" but for Vec<Vec<u8>>
-    cert_chain: Vec<Value>,
-}
-
-impl ResponseApdu for CertsResponse {}
-
-impl CertsResponse {
-    pub fn cert_chain(&self) -> Vec<Vec<u8>> {
-        self.clone()
-            .cert_chain
-            .into_iter()
-            .filter_map(|v| match v {
-                Value::Bytes(bv) => Some(bv),
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-/// Check Certs Response
-///
-/// The auth_sig value is a signature made using the card's public key (card_pubkey).
-///
-/// The signature is created from the digest (SHA-256) of these bytes:
-///
-/// b'OPENDIME' (8 bytes)
-/// (card_nonce - 16 bytes)
-/// (nonce from check command - 16 bytes)
-///
-/// Starting in version 1.0.0 of the SATSCARD, the public key (33 bytes) for the current slot is appended to the above message. (If the current slot is unsealed or not yet used, this does not happen.) With the pubkey in place, the message being signed will be:
-///
-/// b'OPENDIME' (8 bytes)
-/// (card_nonce - 16 bytes)
-/// (nonce from check command - 16 bytes)
-/// (pubkey of current sealed slot - 33 bytes)
-///
-/// The app verifies this signature and checks that the public key in use is the card_pubkey to prove it is talking to a genuine Coinkite card. The signatures of each certificate chain element are then verified by recovering the pubkey at each step. This checks that the batch certificate is signing the card's pubkey, that the root certificate is signing the batch certificate's key and so on. The root certificate's expected pubkey must be shared out-of-band and already known to the app.
-///
-/// At this time, the only valid factory root pubkey is:
-///
-/// 03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1
-#[derive(Deserialize, Clone, Debug)]
-pub struct CheckResponse {
-    /// signature using card_pubkey, 64 bytes
-    #[serde(with = "serde_bytes")]
-    pub auth_sig: Vec<u8>,
-    /// new nonce value, for NEXT command (not this one), 16 bytes
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-}
-
-impl ResponseApdu for CheckResponse {}
 
 /// New Response
 ///
