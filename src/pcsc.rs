@@ -3,7 +3,7 @@ extern crate core;
 use crate::commands::{AppletSelect, CommandApdu, Error, ResponseApdu, StatusResponse};
 use crate::{CkTapCard, SatsCard, TapSigner, Transport};
 use pcsc::{Card, Context, Protocols, Scope, ShareMode, MAX_BUFFER_SIZE};
-
+use secp256k1::hashes::hex::ToHex;
 use secp256k1::{PublicKey, Secp256k1};
 
 pub struct PcscTransport {
@@ -40,36 +40,27 @@ impl Transport for PcscTransport {
         let rapdu = transport.transmit_apdu(applet_select_apdu)?;
         let status_response = StatusResponse::from_cbor(rapdu.to_vec())?;
 
-        // get common fields
-        let secp = Secp256k1::new();
-        let proto = status_response.proto;
-        let ver = status_response.ver;
-        let birth = status_response.birth;
-        let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
-        let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
-        let card_nonce = status_response.card_nonce;
-        let auth_delay = status_response.auth_delay;
+        dbg!(&status_response.pubkey.to_hex());
 
         // Return correct card variant
         match (status_response.tapsigner, status_response.satschip) {
             (Some(true), None) => {
-                let path = status_response.path;
-                let num_backups = status_response.num_backups;
+                // let path = status_response.path;
+                // let num_backups = status_response.num_backups;
 
-                Ok(CkTapCard::TapSigner(TapSigner {
-                    transport,
-                    secp,
-                    proto,
-                    ver,
-                    birth,
-                    path,
-                    num_backups,
-                    pubkey,
-                    card_nonce,
-                    auth_delay,
-                }))
+                Ok(CkTapCard::TapSigner(TapSigner::from_status(transport, status_response)))
             }
             (Some(true), Some(true)) => {
+                // // get common fields - moving to Constructors
+                let secp = Secp256k1::new();
+                let proto = status_response.proto;
+                let ver = status_response.ver;
+                let birth = status_response.birth;
+                let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
+                let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+                let card_nonce = status_response.card_nonce;
+                let auth_delay = status_response.auth_delay;
+
                 let path = status_response.path;
                 let num_backups = status_response.num_backups;
 
@@ -87,6 +78,16 @@ impl Transport for PcscTransport {
                 }))
             }
             (None, None) => {
+                // // get common fields - moving to Constructors
+                let secp = Secp256k1::new();
+                let proto = status_response.proto;
+                let ver = status_response.ver;
+                let birth = status_response.birth;
+                let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
+                let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+                let card_nonce = status_response.card_nonce;
+                let auth_delay = status_response.auth_delay;
+                
                 let slots = status_response
                     .slots
                     .ok_or(Error::CiborValue("Missing slots".to_string()))?;
