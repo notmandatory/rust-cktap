@@ -414,13 +414,6 @@ impl Debug for CheckResponse {
     }
 }
 
-
-
-
-
-
-
-
 /// nfc command to return dynamic url for NFC-enabled smart phone
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcCommand {
@@ -438,6 +431,17 @@ impl CommandApdu for NfcCommand {
         "nfc".to_string()
     }
 }
+
+/// nfc Response
+///
+/// URL for smart phone to navigate to
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct NfcResponse {
+    /// command result
+    pub url: String,
+}
+
+impl ResponseApdu for NfcResponse {}
 
 /// Sign Command
 // {
@@ -500,6 +504,36 @@ impl CommandApdu for SignCommand {
     }
 }
 
+/// Sign Response
+///
+// SATSCARD: Arbitrary signatures can be created for unsealed slots. The app could perform this, since the private key is known, but it's best if the app isn't contaminated with private key information. This could be used for both spending and multisig wallet operations.
+//
+// TAPSIGNER: This is its core feature — signing an arbitrary message digest with a tap. Once the card is set up (the key is picked), the command will always be valid.
+#[derive(Deserialize, Clone, PartialEq, Eq)]
+pub struct SignResponse {
+    /// command result
+    pub slot: u8,
+    #[serde(with = "serde_bytes")]
+    pub sig: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub pubkey: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for SignResponse {}
+
+impl Debug for SignResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("SignResponse")
+            .field("slot", &self.slot)
+            .field("sig", &self.sig.to_hex())
+            .field("pubkey", &self.pubkey.to_hex())
+            .field("card_nonce", &self.card_nonce.to_hex())
+            .finish()
+    }
+}
+
 /// Wait Command
 ///
 /// Invalid CVC codes return error 401 (bad auth), through the third incorrect attempt. After the
@@ -537,6 +571,20 @@ impl CommandApdu for WaitCommand {
         "wait".to_string()
     }
 }
+
+/// Wait Response
+///
+/// When auth_delay is zero, the CVC can be retried and tested without side effects.
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct WaitResponse {
+    /// command result
+    pub success: bool,
+    /// how much more delay is now required
+    #[serde(default)]
+    pub auth_delay: usize,
+}
+
+impl ResponseApdu for WaitResponse {}
 
 /// New Command
 ///
@@ -590,6 +638,29 @@ impl CommandApdu for NewCommand {
     }
 }
 
+/// New Response
+///
+/// There is a very, very small — 1 in 2128 — chance of arriving at an invalid private key. This
+/// returns error 205 (unlucky number). Retries are allowed with no delay. Also, buy a lottery
+/// ticket immediately.
+///
+/// SATSCARD: derived address is generated based on m/0.
+///
+/// TAPSIGNER: uses the default derivation path of m/84h/0h/0h.
+///
+/// In either case, the status and read commands are required to learn the details of the new
+/// address/key.
+#[derive(Deserialize, Clone, Debug)]
+pub struct NewResponse {
+    /// slot just made
+    pub slot: usize,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for NewResponse {}
+
 /// Unseal Command
 ///
 /// Unseal the current slot.
@@ -624,6 +695,31 @@ impl CommandApdu for UnsealCommand {
         "unseal".to_string()
     }
 }
+
+/// Unseal Response
+#[derive(Deserialize, Clone, Debug)]
+pub struct UnsealResponse {
+    /// slot just unsealed
+    pub slot: usize,
+    /// private key for spending (for addr), 32 bytes
+    /// The private keys are encrypted, XORed with the session key
+    #[serde(with = "serde_bytes")]
+    pub privkey: Vec<u8>,
+    /// slot's pubkey (convenience, since could be calc'd from privkey), 33 bytes
+    #[serde(with = "serde_bytes")]
+    pub pubkey: Vec<u8>,
+    /// card's master private key, 32 bytes
+    #[serde(with = "serde_bytes")]
+    pub master_pk: Vec<u8>,
+    /// nonce provided by customer
+    #[serde(with = "serde_bytes")]
+    pub chain_code: Vec<u8>,
+    /// new nonce value, for NEXT command (not this one), 16 bytes
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for UnsealResponse {}
 
 /// Dump Command
 ///
@@ -669,145 +765,6 @@ impl CommandApdu for DumpCommand {
     }
 }
 
-// TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct XpubCommand {
-    cmd: String,  // always "xpub"
-    master: bool, // give master (`m`) XPUB, otherwise derived XPUB
-    #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>, // app's ephemeral public key (required)
-    #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>, //encrypted CVC value (required)
-}
-
-impl CommandApdu for XpubCommand {
-    fn name() -> String {
-        "xpub".to_string()
-    }
-}
-
-impl XpubCommand {
-    pub fn new(master: bool, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
-        Self {
-            cmd: Self::name(),
-            master,
-            epubkey: epubkey.serialize().to_vec(),
-            xcvc,
-        }
-    }
-}
-
-// Responses
-
-// impl Display for StatusResponse {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-//         write!(f, "Name: {}, Age: {}", self.name, self.age)
-//     }
-// }
-
-/// nfc Response
-///
-/// URL for smart phone to navigate to
-#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct NfcResponse {
-    /// command result
-    pub url: String,
-}
-
-impl ResponseApdu for NfcResponse {}
-
-/// Sign Response
-///
-// SATSCARD: Arbitrary signatures can be created for unsealed slots. The app could perform this, since the private key is known, but it's best if the app isn't contaminated with private key information. This could be used for both spending and multisig wallet operations.
-//
-// TAPSIGNER: This is its core feature — signing an arbitrary message digest with a tap. Once the card is set up (the key is picked), the command will always be valid.
-#[derive(Deserialize, Clone, PartialEq, Eq)]
-pub struct SignResponse {
-    /// command result
-    pub slot: u8,
-    #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-}
-
-impl ResponseApdu for SignResponse {}
-
-impl Debug for SignResponse {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.debug_struct("SignResponse")
-            .field("slot", &self.slot)
-            .field("sig", &self.sig.to_hex())
-            .field("pubkey", &self.pubkey.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
-            .finish()
-    }
-}
-
-/// Wait Response
-///
-/// When auth_delay is zero, the CVC can be retried and tested without side effects.
-#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct WaitResponse {
-    /// command result
-    pub success: bool,
-    /// how much more delay is now required
-    #[serde(default)]
-    pub auth_delay: usize,
-}
-
-impl ResponseApdu for WaitResponse {}
-
-/// New Response
-///
-/// There is a very, very small — 1 in 2128 — chance of arriving at an invalid private key. This
-/// returns error 205 (unlucky number). Retries are allowed with no delay. Also, buy a lottery
-/// ticket immediately.
-///
-/// SATSCARD: derived address is generated based on m/0.
-///
-/// TAPSIGNER: uses the default derivation path of m/84h/0h/0h.
-///
-/// In either case, the status and read commands are required to learn the details of the new
-/// address/key.
-#[derive(Deserialize, Clone, Debug)]
-pub struct NewResponse {
-    /// slot just made
-    pub slot: usize,
-    /// new nonce value, for NEXT command (not this one), 16 bytes
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-}
-
-impl ResponseApdu for NewResponse {}
-
-/// Unseal Response
-#[derive(Deserialize, Clone, Debug)]
-pub struct UnsealResponse {
-    /// slot just unsealed
-    pub slot: usize,
-    /// private key for spending (for addr), 32 bytes
-    /// The private keys are encrypted, XORed with the session key
-    #[serde(with = "serde_bytes")]
-    pub privkey: Vec<u8>,
-    /// slot's pubkey (convenience, since could be calc'd from privkey), 33 bytes
-    #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
-    /// card's master private key, 32 bytes
-    #[serde(with = "serde_bytes")]
-    pub master_pk: Vec<u8>,
-    /// nonce provided by customer
-    #[serde(with = "serde_bytes")]
-    pub chain_code: Vec<u8>,
-    /// new nonce value, for NEXT command (not this one), 16 bytes
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-}
-
-impl ResponseApdu for UnsealResponse {}
-
 /// Dump Response
 ///
 /// Without the CVC, the dump command returns just the sealed/unsealed/unused status for each slot,
@@ -850,6 +807,34 @@ pub struct DumpResponse {
 }
 
 impl ResponseApdu for DumpResponse {}
+
+/// TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct XpubCommand {
+    cmd: String,  // always "xpub"
+    master: bool, // give master (`m`) XPUB, otherwise derived XPUB
+    #[serde(with = "serde_bytes")]
+    epubkey: Vec<u8>, // app's ephemeral public key (required)
+    #[serde(with = "serde_bytes")]
+    xcvc: Vec<u8>, //encrypted CVC value (required)
+}
+
+impl CommandApdu for XpubCommand {
+    fn name() -> String {
+        "xpub".to_string()
+    }
+}
+
+impl XpubCommand {
+    pub fn new(master: bool, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+        Self {
+            cmd: Self::name(),
+            master,
+            epubkey: epubkey.serialize().to_vec(),
+            xcvc,
+        }
+    }
+}
 
 #[derive(Deserialize, Clone)]
 pub struct XpubResponse {

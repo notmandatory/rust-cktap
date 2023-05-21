@@ -19,10 +19,27 @@ use commands::*;
 fn from_hex(hex_str: &str) -> Vec<u8> {
     Vec::<u8>::from_hex(&String::from(hex_str)).unwrap()
 }
-// const FACTORY_ROOT_KEYS: Vec<(Vec<u8>, String)> = vec!(
+// const FACTORY_ROOT_KEYS: Vec<(Vec<u8>, String)><'static> = vec!(
 //     (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()), 
 //     (from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"), "Root Factory Certificate (TESTING ONLY)".to_string())
 // );
+
+const FACTORY_ROOT_KEYS: [(&[u8], &str); 2] = [
+    (
+        &[
+            0x03, 0x02, 0x8a, 0x0e, 0x89, 0xe7, 0x0d, 0x0e, 0xc0, 0xd9, 0x32, 0x05, 0x3a, 0x89, 0xab, 0x1d,
+            0xa7, 0xd9, 0x18, 0x2b, 0xdc, 0x6d, 0x2f, 0x03, 0xe7, 0x06, 0xee, 0x99, 0x51, 0x7d, 0x05, 0xd9, 0xe1,
+        ],
+        "Root Factory Certificate",
+    ),
+    (
+        &[
+            0x02, 0x77, 0x22, 0xef, 0x20, 0x8e, 0x68, 0x1b, 0xac, 0x05, 0xf1, 0xb4, 0xb3, 0xcc, 0x47, 0x8d,
+            0x6b, 0xf3, 0x53, 0xac, 0x9a, 0x09, 0xff, 0x0c, 0x84, 0x34, 0x30, 0x13, 0x8f, 0x65, 0xc2, 0x7b, 0xab,
+        ],
+        "Root Factory Certificate (TESTING ONLY)",
+    ),
+];
 
 pub trait Transport {
     fn find_first() -> Result<CkTapCard<Self>, Error>
@@ -122,15 +139,6 @@ impl<T: Transport + Sized> Debug for TapSigner<T> {
 }
 
 impl<T: Transport + Sized> TapSigner<T> {
-    // get common fields
-    // let secp = Secp256k1::new();
-    // let proto = status_response.proto;
-    // let ver = status_response.ver;
-    // let birth = status_response.birth;
-    
-    // let card_nonce = status_response.card_nonce;
-    // let auth_delay = status_response.auth_delay;
-
     pub fn from_status(transport: T, status_response: StatusResponse) -> Self {
         let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
         let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string())).unwrap();
@@ -170,56 +178,53 @@ impl<T: Transport + Sized> TapSigner<T> {
         read_response
     }
 
-    pub fn certs_check(&mut self, cvc: String, nonce: Vec<u8>) -> Result<(), Error> {
+    pub fn certs_check(&mut self, nonce: Vec<u8>) -> Result<String, Error> {
         let card_nonce = self.card_nonce.clone();
 
         let certs_cmd = CertsCommand::default();
         let certs_response: CertsResponse = self.transport.transmit(certs_cmd)?;
-        dbg!(&certs_response);
 
-        // let nonce = rand_nonce().to_vec();
         let check_cmd = CheckCommand::new(nonce.clone());
         let check_response: Result<CheckResponse, Error> = self.transport.transmit(check_cmd);
-        dbg!(&check_response);
-
         if let Ok(response) = &check_response {
             self.card_nonce = response.card_nonce.clone();
         }
 
-        verify_signature(
+        assert!(verify_tapsigner_signature(
             &self.pubkey, 
             check_response.unwrap().auth_sig.clone(), 
             card_nonce, 
             nonce.clone(), 
             &self.secp
-        );
+        ).is_ok());
 
         let mut pubkey = self.pubkey.clone();
         for sig in &certs_response.cert_chain() {
-
-            let rec_id = match sig[0] {
-                39..=42 => RecoveryId::from_i32((sig[0] as i32) - 39).unwrap(),
-                27..=30 => RecoveryId::from_i32((sig[0] as i32) - 27).unwrap(),
-                31..=34 => RecoveryId::from_i32((sig[0] as i32) - 31).unwrap(),
-                _ => panic!("rec_id is wrong or something"),
+            // BIP-137: https://github.com/bitcoin/bips/blob/master/bip-0137.mediawiki
+            let subtract_by = match sig[0] {
+                27..=30 => 27, // P2PKH uncompressed
+                31..=34 => 31, // P2PKH compressed
+                35..=38 => 35, // Segwit P2SH
+                39..=42 => 39, // Segwit Bech32
+                _ => panic!("Unrecognized BIP-137 address")
             };
+            let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
             let (_, sig) = sig.split_at(1);
-
-            dbg!(&rec_id);
-            dbg!(sig.len());
             let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
             let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());            
             pubkey = self.secp.recover_ecdsa(&md, &rec_sig).unwrap();
-            dbg!(&pubkey.serialize().to_hex());
         }
 
-        // if pubkey not in FACTORY_ROOT_KEYS:
-        //     # fraudulent device
-        //     raise RuntimeError("Root cert is not from Coinkite. Card is counterfeit.")
-
-        // FACTORY_ROOT_KEYS[pubkey]
-        
-        Ok(())
+        // todo - as a constant?
+        let factory_root_keys: Vec<(Vec<u8>, String)>= vec!(
+            (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()), 
+            (from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"), "Root Factory Certificate (TESTING ONLY)".to_string())
+        );
+        if let Some((_, value)) = factory_root_keys.iter().find(|(k, _)| *k == pubkey.serialize()) {
+            Ok(value.to_string())
+        } else {
+            Err(Error::CiborValue("Root cert is not from Coinkite. Card is counterfeit.".to_string()))
+        }
     }
 
     pub fn derive(&mut self, path: Vec<usize>, cvc: String) -> Result<DeriveResponse, Error> {
@@ -456,52 +461,33 @@ pub fn rand_nonce(rng: &mut ThreadRng) -> [u8; 16] {
     nonce
 }
 
-
-
-// Sample data pulled from reference implementation
-// card_nonce = fd4c5d2c9d9c5a647cbc0b2b79ffef91
-// card_pubkey = 0335170d9b853440080b0e5d6129f985ebeb919e7a90f28a5fa15c7987ec986a6b
-// my_nonce = 273faf8a0b270f697bcb6c90dc8cd4ba
-// signature = 44721225a42eb3496cc38858adf8fafde9a752776d36c719aaa4f255ab121a0864be7d21eb47a5db88e3879b53ea74794d3e9503cc9b56b8bf9f948324198c30
-
-
-// slot_pubkey = None
-// sha256s(msg) = 4f50454e44494d45fd4c5d2c9d9c5a647cbc0b2b79ffef91273faf8a0b270f697bcb6c90dc8cd4ba
-
-fn verify_signature(card_pubkey: &PublicKey, signature: Vec<u8>, card_nonce: Vec<u8>, app_nonce: Vec<u8>, secp: &Secp256k1<All>) -> Result<(), secp256k1::Error> {
+fn verify_tapsigner_signature(card_pubkey: &PublicKey, signature: Vec<u8>, card_nonce: Vec<u8>, app_nonce: Vec<u8>, secp: &Secp256k1<All>) -> Result<(), secp256k1::Error> {
     let mut message_bytes: Vec<u8> = Vec::new();
     message_bytes.extend("OPENDIME".as_bytes());
     message_bytes.extend(card_nonce);
     message_bytes.extend(app_nonce);
     //     assert len(msg) == 8 + CARD_NONCE_SIZE + USER_NONCE_SIZE
     // message_bytes.extend(current_pubkey);
-
     let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
-    // let auth_sig = &check_response.unwrap().auth_sig;
     let signature = Signature::from_compact(signature.as_slice()).expect("Failed to construct ECDSA signature from check response");
     
     secp.verify_ecdsa(&message, &signature, card_pubkey)
     // dbg!();
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    
-    // TapSigner 
-
     #[test]
-    fn verify_tapsigner_signature() {
+    fn test_tapsigner_signature() {
         let card_pubkey = PublicKey::from_slice(&from_hex("0335170d9b853440080b0e5d6129f985ebeb919e7a90f28a5fa15c7987ec986a6b").as_slice()).map_err(|e| Error::CiborValue(e.to_string())).unwrap();
         let signature: Vec<u8> = from_hex("44721225a42eb3496cc38858adf8fafde9a752776d36c719aaa4f255ab121a0864be7d21eb47a5db88e3879b53ea74794d3e9503cc9b56b8bf9f948324198c30");
         let card_nonce: Vec<u8> = from_hex("fd4c5d2c9d9c5a647cbc0b2b79ffef91");
         let app_nonce: Vec<u8> = from_hex("273faf8a0b270f697bcb6c90dc8cd4ba");
         let secp = Secp256k1::new();
         
-        assert!(verify_signature(
+        assert!(verify_tapsigner_signature(
             &card_pubkey,
             signature,
             card_nonce,

@@ -40,14 +40,9 @@ impl Transport for PcscTransport {
         let rapdu = transport.transmit_apdu(applet_select_apdu)?;
         let status_response = StatusResponse::from_cbor(rapdu.to_vec())?;
 
-        dbg!(&status_response.pubkey.to_hex());
-
         // Return correct card variant
         match (status_response.tapsigner, status_response.satschip) {
             (Some(true), None) => {
-                // let path = status_response.path;
-                // let num_backups = status_response.num_backups;
-
                 Ok(CkTapCard::TapSigner(TapSigner::from_status(transport, status_response)))
             }
             (Some(true), Some(true)) => {
