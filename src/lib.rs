@@ -269,6 +269,17 @@ impl<T: Transport> SharedCommands<T> for SatsCard<T> {
     fn transport(&self) -> &T {
         &self.transport
     }
+
+    // fn signed_message(&self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Vec<u8> {
+    //     let mut message_bytes: Vec<u8> = Vec::new();
+    //     message_bytes.extend("OPENDIME".as_bytes());
+    //     message_bytes.extend(card_nonce);
+    //     message_bytes.extend(app_nonce);
+        // if self.ver() != "0.9.0" {
+        //     let pubkey = self.read().unwrap().pubkey;
+        //     message_bytes.extend(pubkey);
+        // }
+    // }
 }
 
 impl<T: Transport + Sized> SatsCard<T> {
@@ -313,6 +324,69 @@ impl<T: Transport + Sized> SatsCard<T> {
             // must be signed by the master_pubkey
         }
         resp
+    }
+
+    pub fn certs_check(&mut self, nonce: Vec<u8>) -> Result<String, Error> {
+        let card_nonce = self.card_nonce.clone();
+
+        let certs_cmd = CertsCommand::default();
+        let certs_response: CertsResponse = self.transport.transmit(certs_cmd)?;
+
+        let check_cmd = CheckCommand::new(nonce.clone());
+        let check_response: Result<CheckResponse, Error> = self.transport.transmit(check_cmd);
+        if let Ok(response) = &check_response {
+            self.card_nonce = response.card_nonce.clone();
+        }
+
+        assert!(self.verify_satscard_signature(
+            check_response.unwrap().auth_sig.clone(), 
+            card_nonce, 
+            nonce.clone(), 
+        ).is_ok());
+
+        let mut pubkey = self.pubkey.clone();
+        for sig in &certs_response.cert_chain() {
+            // BIP-137: https://github.com/bitcoin/bips/blob/master/bip-0137.mediawiki
+            let subtract_by = match sig[0] {
+                27..=30 => 27, // P2PKH uncompressed
+                31..=34 => 31, // P2PKH compressed
+                35..=38 => 35, // Segwit P2SH
+                39..=42 => 39, // Segwit Bech32
+                _ => panic!("Unrecognized BIP-137 address")
+            };
+            let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
+            let (_, sig) = sig.split_at(1);
+            let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
+            let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());            
+            pubkey = self.secp.recover_ecdsa(&md, &rec_sig).unwrap();
+        }
+
+        // todo - as a constant?
+        let factory_root_keys: Vec<(Vec<u8>, String)>= vec!(
+            (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()), 
+            (from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"), "Root Factory Certificate (TESTING ONLY)".to_string())
+        );
+        if let Some((_, value)) = factory_root_keys.iter().find(|(k, _)| *k == pubkey.serialize()) {
+            Ok(value.to_string())
+        } else {
+            Err(Error::CiborValue("Root cert is not from Coinkite. Card is counterfeit.".to_string()))
+        }
+    }
+
+    fn verify_satscard_signature(&mut self, signature: Vec<u8>, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Result<(), secp256k1::Error> {
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend("OPENDIME".as_bytes());
+        message_bytes.extend(card_nonce);
+        message_bytes.extend(app_nonce);
+        if self.ver != "0.9.0" {
+            let pubkey = self.read().unwrap().pubkey;
+            message_bytes.extend(pubkey);
+        }
+    
+        let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
+        let signature = Signature::from_compact(signature.as_slice()).expect("Failed to construct ECDSA signature from check response");
+        
+        self.secp.verify_ecdsa(&message, &signature, &self.pubkey)
     }
 
     pub fn unseal(&self, slot: usize, cvc: String) -> Result<UnsealResponse, Error> {
@@ -361,6 +435,9 @@ where
 {
     fn transport(&self) -> &T;
 
+    /// The bytes each card signs during authentication
+    // fn signed_message(&self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Vec<u8>;
+
     fn wait(&mut self, cvc: Option<String>) -> Result<WaitResponse, Error> {
         let epubkey_xcvc = cvc.map(|cvc| {
             let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &WaitCommand::name());
@@ -382,6 +459,58 @@ where
         }
         wait_response
     }
+
+    
+    // fn certs_check(&mut self, nonce: Vec<u8>) -> Result<String, Error> {
+    //     let card_nonce = self.card_nonce().clone();
+
+    //     let certs_cmd = CertsCommand::default();
+    //     let certs_response: CertsResponse = self.transport().transmit(certs_cmd)?;
+
+    //     let check_cmd = CheckCommand::new(nonce.clone());
+    //     let check_response: Result<CheckResponse, Error> = self.transport().transmit(check_cmd);
+    //     if let Ok(response) = &check_response {
+    //         self.card_nonce = response.card_nonce.clone();
+    //     }
+
+    //     // self.signed_message(card_nonce, app_nonce);
+        
+    //     assert!(verify_tapsigner_signature(
+    //         &self.pubkey, 
+    //         check_response.unwrap().auth_sig.clone(), 
+    //         card_nonce, 
+    //         nonce.clone(), 
+    //         &self.secp
+    //     ).is_ok());
+
+    //     let mut pubkey = self.pubkey.clone();
+    //     for sig in &certs_response.cert_chain() {
+    //         // BIP-137: https://github.com/bitcoin/bips/blob/master/bip-0137.mediawiki
+    //         let subtract_by = match sig[0] {
+    //             27..=30 => 27, // P2PKH uncompressed
+    //             31..=34 => 31, // P2PKH compressed
+    //             35..=38 => 35, // Segwit P2SH
+    //             39..=42 => 39, // Segwit Bech32
+    //             _ => panic!("Unrecognized BIP-137 address")
+    //         };
+    //         let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
+    //         let (_, sig) = sig.split_at(1);
+    //         let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
+    //         let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());            
+    //         pubkey = self.secp.recover_ecdsa(&md, &rec_sig).unwrap();
+    //     }
+
+    //     // todo - as a constant?
+    //     let factory_root_keys: Vec<(Vec<u8>, String)>= vec!(
+    //         (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()), 
+    //         (from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"), "Root Factory Certificate (TESTING ONLY)".to_string())
+    //     );
+    //     if let Some((_, value)) = factory_root_keys.iter().find(|(k, _)| *k == pubkey.serialize()) {
+    //         Ok(value.to_string())
+    //     } else {
+    //         Err(Error::CiborValue("Root cert is not from Coinkite. Card is counterfeit.".to_string()))
+    //     }
+    // }
 
     fn certs(&self) -> Result<CertsResponse, Error> {
         let certs_command = CertsCommand::default();

@@ -84,13 +84,14 @@ fn main() -> Result<(), Error> {
                 dbg!(wait_response);
             }
 
-            let read_result = card.read()?;
-            dbg!(read_result);
+            // let read_result = card.read()?;
+            // dbg!(read_result);
 
-            let derive_result = card.derive()?;
-            dbg!(&derive_result);
+            // let derive_result = card.derive()?;
+            // dbg!(&derive_result);
 
-
+            let nonce = rand_nonce(rng);
+            dbg!(card.certs_check(nonce.to_vec()));
 
             // let nfc_result = card.nfc()?;
             // dbg!(nfc_result);
