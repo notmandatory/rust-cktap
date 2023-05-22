@@ -35,7 +35,7 @@ fn main() -> Result<(), Error> {
             // only do this once per card!
             if card.path.is_none() {
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = card.init(chain_code, cvc.clone())?;
+                let new_result = card.init(chain_code, cvc)?;
                 dbg!(new_result);
             }
 
@@ -70,7 +70,7 @@ fn main() -> Result<(), Error> {
                 dbg!(new_result);
             }
 
-            let read_result = card.read(cvc.clone())?;
+            let read_result = card.read(cvc)?;
             dbg!(read_result);
 
             let nfc_result = card.nfc()?;
@@ -91,7 +91,7 @@ fn main() -> Result<(), Error> {
             // dbg!(&derive_result);
 
             let nonce = rand_nonce(rng);
-            dbg!(card.certs_check(nonce.to_vec()));
+            dbg!(card.certs_check(nonce.to_vec()).unwrap());
 
             // let nfc_result = card.nfc()?;
             // dbg!(nfc_result);

@@ -3,7 +3,6 @@ extern crate core;
 use crate::commands::{AppletSelect, CommandApdu, Error, ResponseApdu, StatusResponse};
 use crate::{CkTapCard, SatsCard, TapSigner, Transport};
 use pcsc::{Card, Context, Protocols, Scope, ShareMode, MAX_BUFFER_SIZE};
-use secp256k1::hashes::hex::ToHex;
 use secp256k1::{PublicKey, Secp256k1};
 
 pub struct PcscTransport {
@@ -88,7 +87,7 @@ impl Transport for PcscTransport {
 
                 let slots = status_response
                     .slots
-                    .ok_or(Error::CiborValue("Missing slots".to_string()))?;
+                    .ok_or_else(|| Error::CiborValue("Missing slots".to_string()))?;
 
                 let addr = status_response.addr;
 
@@ -114,7 +113,7 @@ impl Transport for PcscTransport {
 
     fn transmit_apdu(&self, apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
         let mut receive_buffer = vec![0; MAX_BUFFER_SIZE];
-        let rapdu = self.card.transmit(&apdu.as_slice(), &mut receive_buffer)?;
+        let rapdu = self.card.transmit(apdu.as_slice(), &mut receive_buffer)?;
         Ok(rapdu.to_vec())
     }
 }

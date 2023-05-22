@@ -85,10 +85,10 @@ pub trait ResponseApdu {
         let cbor_value: Value = from_reader(&cbor[..])?;
         let cbor_struct: Result<ErrorResponse, _> = cbor_value.deserialized();
         if let Ok(error_resp) = cbor_struct {
-            Err(Error::CkTap {
+            return Err(Error::CkTap {
                 error: error_resp.error,
                 code: error_resp.code,
-            })?;
+            });
         }
         let cbor_struct: Self = cbor_value.deserialized()?;
         Ok(cbor_struct)
@@ -102,7 +102,6 @@ fn build_apdu(header: &[u8], command: &[u8]) -> Vec<u8> {
 }
 
 /// Applet Select
-///
 #[derive(Default, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct AppletSelect {}
 
@@ -116,7 +115,6 @@ impl CommandApdu for AppletSelect {
 }
 
 /// Status Command
-///
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct StatusCommand {
     /// 'status' command
@@ -512,7 +510,6 @@ impl CommandApdu for SignCommand {
 }
 
 /// Sign Response
-///
 // SATSCARD: Arbitrary signatures can be created for unsealed slots. The app could perform this, since the private key is known, but it's best if the app isn't contaminated with private key information. This could be used for both spending and multisig wallet operations.
 //
 // TAPSIGNER: This is its core feature — signing an arbitrary message digest with a tap. Once the card is set up (the key is picked), the command will always be valid.
@@ -600,16 +597,6 @@ impl ResponseApdu for WaitResponse {}
 /// TAPSIGNER: This command is only used once.
 ///
 /// The slot number is included in the request to prevent command replay.
-///
-/// At this point:
-///
-///     No new slots available? Abort and fail command.
-///     A new key pair is picked and stored into the new slot.
-///         The chain_code must be used in that process and stored.
-///         The card uses TRNG to pick a new master_pubkey (pair).
-///
-/// The new values take effect immediately, so some fields of the next status response will have
-/// new values.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct NewCommand {
     /// 'new' command

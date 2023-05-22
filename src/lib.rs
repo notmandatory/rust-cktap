@@ -1,11 +1,11 @@
 use secp256k1::ecdh::SharedSecret;
 use secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
-use secp256k1::hashes::hex::{FromHex, ToHex};
 use secp256k1::hashes::{sha256, Hash};
 
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
 use secp256k1::{rand, All, Message, PublicKey, Secp256k1, SecretKey};
+use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
 
@@ -17,10 +17,6 @@ pub mod pcsc;
 
 use commands::*;
 use factory_root_key::FactoryRootKey;
-
-fn from_hex(hex_str: &str) -> Vec<u8> {
-    Vec::<u8>::from_hex(&String::from(hex_str)).unwrap()
-}
 
 pub trait Transport {
     fn find_first() -> Result<CkTapCard<Self>, Error>
@@ -376,13 +372,9 @@ where
             // self.card_nonce = response.card_nonce.clone();
         }
 
-        self.verify_card_signature(
-            check_response.unwrap().auth_sig.clone(),
-            card_nonce,
-            nonce.clone(),
-        )?;
+        self.verify_card_signature(check_response.unwrap().auth_sig, card_nonce, nonce)?;
 
-        let mut pubkey = self.pubkey().clone();
+        let mut pubkey = *self.pubkey();
         for sig in &certs_response.cert_chain() {
             // BIP-137: https://github.com/bitcoin/bips/blob/master/bip-0137.mediawiki
             let subtract_by = match sig[0] {
@@ -395,7 +387,7 @@ where
             let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
             let (_, sig) = sig.split_at(1);
             let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
-            let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());
+            let md = Message::from_hashed_data::<sha256::Hash>(&pubkey.serialize());
             pubkey = self.secp().recover_ecdsa(&md, &rec_sig).unwrap();
         }
 
@@ -414,7 +406,7 @@ where
             .expect("Failed to construct ECDSA signature from check response");
 
         self.secp()
-            .verify_ecdsa(&message, &signature, &self.pubkey())
+            .verify_ecdsa(&message, &signature, self.pubkey())
     }
 
     fn certs(&self) -> Result<CertsResponse, Error> {
@@ -437,7 +429,7 @@ pub trait Authentication {
     fn auth_delay(&self) -> &Option<usize>;
     fn set_auth_delay(&mut self, auth_delay: Option<usize>);
 
-    fn calc_ekeys_xcvc(&self, cvc: String, command: &String) -> (SecretKey, PublicKey, Vec<u8>) {
+    fn calc_ekeys_xcvc(&self, cvc: String, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
         let secp = Self::secp(self);
         let pubkey = Self::pubkey(self);
         let nonce = Self::card_nonce(self);

@@ -1,6 +1,7 @@
 use crate::commands::Error;
 use secp256k1::hashes::hex::ToHex;
 use secp256k1::PublicKey;
+use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
 
