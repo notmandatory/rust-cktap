@@ -40,7 +40,7 @@ fn main() -> Result<(), Error> {
             }
 
             let nonce = rand_nonce(rng);
-            dbg!(card.certs_check(nonce.to_vec()));
+            dbg!(card.certs_check(nonce.to_vec()).unwrap().name());
 
             //let dump_result = card.dump();
 

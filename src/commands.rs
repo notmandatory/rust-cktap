@@ -25,6 +25,7 @@ pub enum Error {
         error: String,
         code: usize,
     },
+    IncorrectSignature(String),
     #[cfg(feature = "pcsc")]
     PcSc(String),
 }
@@ -40,7 +41,13 @@ where
 
 impl From<ciborium::value::Error> for Error {
     fn from(e: ciborium::value::Error) -> Self {
-        Error::CiborDe(e.to_string())
+        Error::CiborValue(e.to_string())
+    }
+}
+
+impl From<secp256k1::Error> for Error {
+    fn from(e: secp256k1::Error) -> Self {
+        Error::IncorrectSignature(e.to_string())
     }
 }
 
@@ -245,7 +252,7 @@ pub struct DeriveCommand {
     #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
-    xcvc: Option<Vec<u8>>, 
+    xcvc: Option<Vec<u8>>,
 }
 
 impl CommandApdu for DeriveCommand {
@@ -266,10 +273,10 @@ impl DeriveCommand {
     }
 
     pub fn for_tapsigner(
-        nonce: Vec<u8>, 
-        path: Vec<usize>, 
-        epubkey: PublicKey, 
-        xcvc: Vec<u8>
+        nonce: Vec<u8>,
+        path: Vec<usize>,
+        epubkey: PublicKey,
+        xcvc: Vec<u8>,
     ) -> Self {
         DeriveCommand {
             cmd: Self::name(),

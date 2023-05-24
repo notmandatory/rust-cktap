@@ -42,9 +42,10 @@ impl Transport for PcscTransport {
 
         // Return correct card variant
         match (status_response.tapsigner, status_response.satschip) {
-            (Some(true), None) => {
-                Ok(CkTapCard::TapSigner(TapSigner::from_status(transport, status_response)))
-            }
+            (Some(true), None) => Ok(CkTapCard::TapSigner(TapSigner::from_status(
+                transport,
+                status_response,
+            ))),
             (Some(true), Some(true)) => {
                 // // get common fields - moving to Constructors
                 let secp = Secp256k1::new();
@@ -52,7 +53,8 @@ impl Transport for PcscTransport {
                 let ver = status_response.ver;
                 let birth = status_response.birth;
                 let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
-                let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+                let pubkey =
+                    PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
                 let card_nonce = status_response.card_nonce;
                 let auth_delay = status_response.auth_delay;
 
@@ -79,10 +81,11 @@ impl Transport for PcscTransport {
                 let ver = status_response.ver;
                 let birth = status_response.birth;
                 let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
-                let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+                let pubkey =
+                    PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
                 let card_nonce = status_response.card_nonce;
                 let auth_delay = status_response.auth_delay;
-                
+
                 let slots = status_response
                     .slots
                     .ok_or(Error::CiborValue("Missing slots".to_string()))?;

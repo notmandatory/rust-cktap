@@ -1,20 +1,22 @@
 use secp256k1::ecdh::SharedSecret;
-use secp256k1::ecdsa::{Signature, RecoverableSignature, RecoveryId};
-use secp256k1::hashes::{sha256, Hash};
+use secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
 use secp256k1::hashes::hex::{FromHex, ToHex};
+use secp256k1::hashes::{sha256, Hash};
 
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
-use secp256k1::{rand, All, PublicKey, Secp256k1, SecretKey, Message};
+use secp256k1::{rand, All, Message, PublicKey, Secp256k1, SecretKey};
 use std::fmt;
 use std::fmt::Debug;
 
+pub mod factory_root_key;
 pub mod commands;
 
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
 
 use commands::*;
+use factory_root_key::FactoryRootKey;
 
 fn from_hex(hex_str: &str) -> Vec<u8> {
     Vec::<u8>::from_hex(&String::from(hex_str)).unwrap()
@@ -120,7 +122,9 @@ impl<T: Transport + Sized> Debug for TapSigner<T> {
 impl<T: Transport + Sized> TapSigner<T> {
     pub fn from_status(transport: T, status_response: StatusResponse) -> Self {
         let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
-        let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string())).unwrap();
+        let pubkey = PublicKey::from_slice(pubkey)
+            .map_err(|e| Error::CiborValue(e.to_string()))
+            .unwrap();
         Self {
             transport,
             secp: Secp256k1::new(),
@@ -157,7 +161,7 @@ impl<T: Transport + Sized> TapSigner<T> {
         read_response
     }
 
-    pub fn certs_check(&mut self, nonce: Vec<u8>) -> Result<String, Error> {
+    pub fn certs_check(&mut self, nonce: Vec<u8>) -> Result<FactoryRootKey, Error> {
         let card_nonce = self.card_nonce.clone();
 
         let certs_cmd = CertsCommand::default();
@@ -169,13 +173,13 @@ impl<T: Transport + Sized> TapSigner<T> {
             self.card_nonce = response.card_nonce.clone();
         }
 
-        assert!(verify_tapsigner_signature(
-            &self.pubkey, 
-            check_response.unwrap().auth_sig.clone(), 
-            card_nonce, 
-            nonce.clone(), 
+        verify_tapsigner_signature(
+            &self.pubkey,
+            check_response.unwrap().auth_sig.clone(),
+            card_nonce,
+            nonce.clone(),
             &self.secp
-        ).is_ok());
+        )?;
 
         let mut pubkey = self.pubkey.clone();
         for sig in &certs_response.cert_chain() {
@@ -185,45 +189,41 @@ impl<T: Transport + Sized> TapSigner<T> {
                 31..=34 => 31, // P2PKH compressed
                 35..=38 => 35, // Segwit P2SH
                 39..=42 => 39, // Segwit Bech32
-                _ => panic!("Unrecognized BIP-137 address")
+                _ => panic!("Unrecognized BIP-137 address"),
             };
             let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
             let (_, sig) = sig.split_at(1);
             let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
-            let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());            
+            let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());
             pubkey = self.secp.recover_ecdsa(&md, &rec_sig).unwrap();
         }
 
-        // todo - as a constant?
-        let factory_root_keys: Vec<(Vec<u8>, String)>= vec!(
-            (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()), 
-            (from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"), "Root Factory Certificate (TESTING ONLY)".to_string())
-        );
-        if let Some((_, value)) = factory_root_keys.iter().find(|(k, _)| *k == pubkey.serialize()) {
-            Ok(value.to_string())
-        } else {
-            Err(Error::CiborValue("Root cert is not from Coinkite. Card is counterfeit.".to_string()))
-        }
+        FactoryRootKey::try_from(pubkey)
+        // pubkey.try_into()
+        //     .iter()
+        //     .find(|(k, _)| *k == pubkey.serialize())
+        // {
+        //     Ok(value.to_string())
+        // } else {
+        //     Err(Error::IncorrectSignature(
+        //         "Root cert is not from Coinkite. Card is counterfeit.".to_string(),
+        //     ))
+        // }
     }
 
     pub fn derive(&mut self, path: Vec<usize>, cvc: String) -> Result<DeriveResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &DeriveCommand::name());
-        let cmd = DeriveCommand::for_tapsigner(
-            self.card_nonce.clone(),
-            path, 
-            epubkey, 
-            xcvc
-        );
+        let cmd = DeriveCommand::for_tapsigner(self.card_nonce.clone(), path, epubkey, xcvc);
         let resp: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
         if let Ok(derive_resp) = &resp {
             self.card_nonce = derive_resp.card_nonce.clone();
 
             // TODO: verify reponse
             // The digest:
-                // b'OPENDIME' (8 bytes)    
-                // (card_nonce - 16 bytes)
-                // (nonce from command - 16 bytes)
-                // (chain_code - 32 bytes)
+            // b'OPENDIME' (8 bytes)
+            // (card_nonce - 16 bytes)
+            // (nonce from command - 16 bytes)
+            // (chain_code - 32 bytes)
             // must be signed by the master_pubkey
         }
         resp
@@ -275,10 +275,10 @@ impl<T: Transport> SharedCommands<T> for SatsCard<T> {
     //     message_bytes.extend("OPENDIME".as_bytes());
     //     message_bytes.extend(card_nonce);
     //     message_bytes.extend(app_nonce);
-        // if self.ver() != "0.9.0" {
-        //     let pubkey = self.read().unwrap().pubkey;
-        //     message_bytes.extend(pubkey);
-        // }
+    // if self.ver() != "0.9.0" {
+    //     let pubkey = self.read().unwrap().pubkey;
+    //     message_bytes.extend(pubkey);
+    // }
     // }
 }
 
@@ -317,10 +317,10 @@ impl<T: Transport + Sized> SatsCard<T> {
 
             // TODO: verify reponse
             // The digest:
-                // b'OPENDIME' (8 bytes)    
-                // (card_nonce - 16 bytes)
-                // (nonce from command - 16 bytes)
-                // (chain_code - 32 bytes)
+            // b'OPENDIME' (8 bytes)
+            // (card_nonce - 16 bytes)
+            // (nonce from command - 16 bytes)
+            // (chain_code - 32 bytes)
             // must be signed by the master_pubkey
         }
         resp
@@ -338,11 +338,13 @@ impl<T: Transport + Sized> SatsCard<T> {
             self.card_nonce = response.card_nonce.clone();
         }
 
-        assert!(self.verify_satscard_signature(
-            check_response.unwrap().auth_sig.clone(), 
-            card_nonce, 
-            nonce.clone(), 
-        ).is_ok());
+        assert!(self
+            .verify_satscard_signature(
+                check_response.unwrap().auth_sig.clone(),
+                card_nonce,
+                nonce.clone(),
+            )
+            .is_ok());
 
         let mut pubkey = self.pubkey.clone();
         for sig in &certs_response.cert_chain() {
@@ -352,28 +354,44 @@ impl<T: Transport + Sized> SatsCard<T> {
                 31..=34 => 31, // P2PKH compressed
                 35..=38 => 35, // Segwit P2SH
                 39..=42 => 39, // Segwit Bech32
-                _ => panic!("Unrecognized BIP-137 address")
+                _ => panic!("Unrecognized BIP-137 address"),
             };
             let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
             let (_, sig) = sig.split_at(1);
             let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
-            let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());            
+            let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());
             pubkey = self.secp.recover_ecdsa(&md, &rec_sig).unwrap();
         }
 
         // todo - as a constant?
-        let factory_root_keys: Vec<(Vec<u8>, String)>= vec!(
-            (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()), 
-            (from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"), "Root Factory Certificate (TESTING ONLY)".to_string())
-        );
-        if let Some((_, value)) = factory_root_keys.iter().find(|(k, _)| *k == pubkey.serialize()) {
+        let factory_root_keys: Vec<(Vec<u8>, String)> = vec![
+            (
+                from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"),
+                "Root Factory Certificate".to_string(),
+            ),
+            (
+                from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"),
+                "Root Factory Certificate (TESTING ONLY)".to_string(),
+            ),
+        ];
+        if let Some((_, value)) = factory_root_keys
+            .iter()
+            .find(|(k, _)| *k == pubkey.serialize())
+        {
             Ok(value.to_string())
         } else {
-            Err(Error::CiborValue("Root cert is not from Coinkite. Card is counterfeit.".to_string()))
+            Err(Error::CiborValue(
+                "Root cert is not from Coinkite. Card is counterfeit.".to_string(),
+            ))
         }
     }
 
-    fn verify_satscard_signature(&mut self, signature: Vec<u8>, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Result<(), secp256k1::Error> {
+    fn verify_satscard_signature(
+        &mut self,
+        signature: Vec<u8>,
+        card_nonce: Vec<u8>,
+        app_nonce: Vec<u8>,
+    ) -> Result<(), secp256k1::Error> {
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
@@ -382,10 +400,11 @@ impl<T: Transport + Sized> SatsCard<T> {
             let pubkey = self.read().unwrap().pubkey;
             message_bytes.extend(pubkey);
         }
-    
+
         let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
-        let signature = Signature::from_compact(signature.as_slice()).expect("Failed to construct ECDSA signature from check response");
-        
+        let signature = Signature::from_compact(signature.as_slice())
+            .expect("Failed to construct ECDSA signature from check response");
+
         self.secp.verify_ecdsa(&message, &signature, &self.pubkey)
     }
 
@@ -460,7 +479,6 @@ where
         wait_response
     }
 
-    
     // fn certs_check(&mut self, nonce: Vec<u8>) -> Result<String, Error> {
     //     let card_nonce = self.card_nonce().clone();
 
@@ -474,12 +492,12 @@ where
     //     }
 
     //     // self.signed_message(card_nonce, app_nonce);
-        
+
     //     assert!(verify_tapsigner_signature(
-    //         &self.pubkey, 
-    //         check_response.unwrap().auth_sig.clone(), 
-    //         card_nonce, 
-    //         nonce.clone(), 
+    //         &self.pubkey,
+    //         check_response.unwrap().auth_sig.clone(),
+    //         card_nonce,
+    //         nonce.clone(),
     //         &self.secp
     //     ).is_ok());
 
@@ -496,13 +514,13 @@ where
     //         let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
     //         let (_, sig) = sig.split_at(1);
     //         let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
-    //         let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());            
+    //         let md = Message::from_hashed_data::<sha256::Hash>(pubkey.serialize().as_slice());
     //         pubkey = self.secp.recover_ecdsa(&md, &rec_sig).unwrap();
     //     }
 
     //     // todo - as a constant?
     //     let factory_root_keys: Vec<(Vec<u8>, String)>= vec!(
-    //         (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()), 
+    //         (from_hex("03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1"), "Root Factory Certificate".to_string()),
     //         (from_hex("027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab"), "Root Factory Certificate (TESTING ONLY)".to_string())
     //     );
     //     if let Some((_, value)) = factory_root_keys.iter().find(|(k, _)| *k == pubkey.serialize()) {
@@ -569,7 +587,13 @@ pub fn rand_nonce(rng: &mut ThreadRng) -> [u8; 16] {
     nonce
 }
 
-fn verify_tapsigner_signature(card_pubkey: &PublicKey, signature: Vec<u8>, card_nonce: Vec<u8>, app_nonce: Vec<u8>, secp: &Secp256k1<All>) -> Result<(), secp256k1::Error> {
+fn verify_tapsigner_signature(
+    card_pubkey: &PublicKey,
+    signature: Vec<u8>,
+    card_nonce: Vec<u8>,
+    app_nonce: Vec<u8>,
+    secp: &Secp256k1<All>,
+) -> Result<(), secp256k1::Error> {
     let mut message_bytes: Vec<u8> = Vec::new();
     message_bytes.extend("OPENDIME".as_bytes());
     message_bytes.extend(card_nonce);
@@ -577,8 +601,9 @@ fn verify_tapsigner_signature(card_pubkey: &PublicKey, signature: Vec<u8>, card_
     //     assert len(msg) == 8 + CARD_NONCE_SIZE + USER_NONCE_SIZE
     // message_bytes.extend(current_pubkey);
     let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
-    let signature = Signature::from_compact(signature.as_slice()).expect("Failed to construct ECDSA signature from check response");
-    
+    let signature = Signature::from_compact(signature.as_slice())
+        .expect("Failed to construct ECDSA signature from check response");
+
     secp.verify_ecdsa(&message, &signature, card_pubkey)
     // dbg!();
 }
@@ -589,18 +614,20 @@ mod tests {
 
     #[test]
     fn test_tapsigner_signature() {
-        let card_pubkey = PublicKey::from_slice(&from_hex("0335170d9b853440080b0e5d6129f985ebeb919e7a90f28a5fa15c7987ec986a6b").as_slice()).map_err(|e| Error::CiborValue(e.to_string())).unwrap();
+        let card_pubkey = PublicKey::from_slice(
+            &from_hex("0335170d9b853440080b0e5d6129f985ebeb919e7a90f28a5fa15c7987ec986a6b")
+                .as_slice(),
+        )
+        .map_err(|e| Error::CiborValue(e.to_string()))
+        .unwrap();
         let signature: Vec<u8> = from_hex("44721225a42eb3496cc38858adf8fafde9a752776d36c719aaa4f255ab121a0864be7d21eb47a5db88e3879b53ea74794d3e9503cc9b56b8bf9f948324198c30");
         let card_nonce: Vec<u8> = from_hex("fd4c5d2c9d9c5a647cbc0b2b79ffef91");
         let app_nonce: Vec<u8> = from_hex("273faf8a0b270f697bcb6c90dc8cd4ba");
         let secp = Secp256k1::new();
-        
-        assert!(verify_tapsigner_signature(
-            &card_pubkey,
-            signature,
-            card_nonce,
-            app_nonce,
-            &secp
-        ).is_ok());
+
+        assert!(
+            verify_tapsigner_signature(&card_pubkey, signature, card_nonce, app_nonce, &secp)
+                .is_ok()
+        );
     }
 }
