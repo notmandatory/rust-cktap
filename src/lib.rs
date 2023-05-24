@@ -9,8 +9,8 @@ use secp256k1::{rand, All, Message, PublicKey, Secp256k1, SecretKey};
 use std::fmt;
 use std::fmt::Debug;
 
-pub mod factory_root_key;
 pub mod commands;
+pub mod factory_root_key;
 
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
@@ -376,8 +376,7 @@ where
             // self.card_nonce = response.card_nonce.clone();
         }
 
-
-        self.verify_card_signature( 
+        self.verify_card_signature(
             check_response.unwrap().auth_sig.clone(),
             card_nonce,
             nonce.clone(),
@@ -413,8 +412,9 @@ where
         let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
         let signature = Signature::from_compact(signature.as_slice())
             .expect("Failed to construct ECDSA signature from check response");
-    
-        self.secp().verify_ecdsa(&message, &signature, &self.pubkey())
+
+        self.secp()
+            .verify_ecdsa(&message, &signature, &self.pubkey())
     }
 
     fn certs(&self) -> Result<CertsResponse, Error> {
