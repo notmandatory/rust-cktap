@@ -1,4 +1,4 @@
-use crate::commands::Error;
+use crate::apdu::Error;
 use secp256k1::hashes::hex::ToHex;
 use secp256k1::PublicKey;
 use std::convert::TryFrom;

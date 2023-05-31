@@ -1,8 +1,14 @@
 extern crate core;
 
-use rust_cktap::commands::Error;
+use rust_cktap::apdu::Error;
+use rust_cktap::commands::{
+    Certificate,
+    // Read,
+    Wait,
+};
 use rust_cktap::rand_nonce;
-use rust_cktap::{pcsc::PcscTransport, rand_chaincode, CkTapCard, SharedCommands, Transport};
+use rust_cktap::{pcsc, rand_chaincode, CkTapCard};
+
 use secp256k1::rand;
 use std::io;
 use std::io::Write;
@@ -17,35 +23,35 @@ fn get_cvc() -> String {
 
 // Example using pcsc crate
 fn main() -> Result<(), Error> {
-    let card = PcscTransport::find_first()?;
+    let card = pcsc::find_first()?;
     dbg!(&card);
 
     let rng = &mut rand::thread_rng();
 
     match card {
-        CkTapCard::TapSigner(mut card) => {
+        CkTapCard::TapSigner(mut ts) => {
             let cvc: String = get_cvc();
 
             // if auth delay call wait
-            while card.auth_delay.is_some() {
-                dbg!(card.auth_delay.unwrap());
-                card.wait(None)?;
+            while ts.auth_delay.is_some() {
+                dbg!(ts.auth_delay.unwrap());
+                ts.wait(None)?;
             }
 
             // only do this once per card!
-            if card.path.is_none() {
+            if ts.path.is_none() {
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = card.init(chain_code, cvc)?;
+                let new_result = ts.init(chain_code, cvc)?;
                 dbg!(new_result);
             }
 
-            let nonce = rand_nonce(rng);
-            dbg!(card.certs_check(nonce.to_vec()).unwrap().name());
-
-            //let dump_result = card.dump();
-
             // let read_result = card.read(cvc.clone())?;
             // dbg!(read_result);
+
+            let nonce = rand_nonce(rng);
+            dbg!(ts.check_certificate(nonce.to_vec()).unwrap().name());
+
+            //let dump_result = card.dump();
 
             // let path = vec![2147483732, 2147483648, 2147483648];
             // let derive_result = card.derive(path, cvc.clone())?;
@@ -54,44 +60,44 @@ fn main() -> Result<(), Error> {
             // let nfc_result = card.nfc()?;
             // dbg!(nfc_result);
         }
-        CkTapCard::SatsChip(mut card) => {
-            let cvc: String = get_cvc();
+        CkTapCard::SatsChip(mut chip) => {
+            let _cvc: String = get_cvc();
 
             // if auth delay call wait
-            while card.auth_delay.is_some() {
-                dbg!(card.auth_delay.unwrap());
-                card.wait(None)?;
+            while chip.auth_delay.is_some() {
+                dbg!(chip.auth_delay.unwrap());
+                chip.wait(None)?;
             }
 
             // only do this once per card!
-            if card.path.is_none() {
+            if chip.path.is_none() {
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = card.init(chain_code, get_cvc())?;
+                let new_result = chip.init(chain_code, get_cvc())?;
                 dbg!(new_result);
             }
 
-            let read_result = card.read(cvc)?;
-            dbg!(read_result);
+            // let read_result = card.read(cvc)?;
+            // dbg!(read_result);
 
-            let nfc_result = card.nfc()?;
-            dbg!(nfc_result);
+            // let nfc_result = card.nfc()?;
+            // dbg!(nfc_result);
         }
-        CkTapCard::SatsCard(mut card) => {
+        CkTapCard::SatsCard(mut sc) => {
             // if auth delay call wait
-            while card.auth_delay.is_some() {
-                dbg!(card.auth_delay.unwrap());
-                let wait_response = card.wait(None)?;
+            while sc.auth_delay.is_some() {
+                dbg!(sc.auth_delay.unwrap());
+                let wait_response = sc.wait(None)?;
                 dbg!(wait_response);
             }
 
-            // let read_result = card.read()?;
+            // let read_result = sc.read(None)?;
             // dbg!(read_result);
 
             // let derive_result = card.derive()?;
             // dbg!(&derive_result);
 
             let nonce = rand_nonce(rng);
-            dbg!(card.certs_check(nonce.to_vec()).unwrap());
+            dbg!(sc.check_certificate(nonce.to_vec()).unwrap().name());
 
             // let nfc_result = card.nfc()?;
             // dbg!(nfc_result);
