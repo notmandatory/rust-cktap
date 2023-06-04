@@ -20,7 +20,6 @@ pub fn find_first() -> Result<CkTapCard<Card>, Error> {
             Err(Error::PcSc("No readers are connected.".to_string()))
         }
     }?;
-    println!("Using reader: {:?}\n", reader);
 
     ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?
         .to_cktap()

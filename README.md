@@ -47,18 +47,24 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 
 1. USB PCSC NFC card reader, for example:  
    * [OMNIKEY 5022 CL](https://www.hidglobal.com/products/omnikey-5022-reader)
-3. Coinkite SATSCARD, TAPSIGNER, or SATSCHIP cards
+2. Coinkite SATSCARD, TAPSIGNER, or SATSCHIP cards
+Install vendor PCSC driver
+3. Connect NFC reader to desktop system
+4. Place SATSCARD, TAPSIGNER, or SATSCHIP on reader
 
-#### Run steps
+#### Run example
 
-1. Install vendor PCSC driver
-2. Connect NFC reader to desktop system
-3. Place SATSCARD, TAPSIGNER, or SATSCHIP on reader
-4. Run example
    ```
-   cargo run --example pcsc --features pcsc
+   cargo run -p rust-cktap --example pcsc --features pcsc
    ```
-   **TODO: create CLI tool to replace example**
+ 
+#### Run CLI
+
+   ```
+   cargo run -p cktap-cli -- --help
+   cargo run -p cktap-cli -- certs
+   cargo run -p cktap-cli -- read
+   ```
 
 [SATSCARD]: https://satscard.com/
 [TAPSIGNER]: https://tapsigner.com/

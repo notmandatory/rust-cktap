@@ -1,5 +1,5 @@
-use crate::apdu::*;
 use crate::factory_root_key::FactoryRootKey;
+use crate::{apdu::*, rand_nonce};
 use crate::{CkTapCard, SatsCard, TapSigner};
 
 use secp256k1::ecdh::SharedSecret;
@@ -136,7 +136,10 @@ where
 {
     fn message_digest(&mut self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message;
 
-    fn check_certificate(&mut self, nonce: Vec<u8>) -> Result<FactoryRootKey, Error> {
+    fn check_certificate(&mut self) -> Result<FactoryRootKey, Error> {
+        let rng = &mut rand::thread_rng();
+        let nonce = rand_nonce(rng).to_vec();
+
         let card_nonce = self.card_nonce().clone();
 
         let certs_cmd = CertsCommand::default();

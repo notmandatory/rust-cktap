@@ -1,0 +1,19 @@
+[package]
+name = "rust-cktap"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ciborium = "0.2.0"
+serde = "1"
+serde_bytes = "0.11"
+secp256k1 = { version = "0.26.0", features = ["rand-std", "bitcoin-hashes-std", "recovery"] }
+
+# optional dependencies
+pcsc = { version = "2", optional = true }
+
+[[example]]
+name = "pcsc"
+required-features = ["pcsc"]
