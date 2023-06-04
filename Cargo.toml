@@ -13,7 +13,12 @@ secp256k1 = { version = "0.26.0", features = ["rand-std", "bitcoin-hashes-std", 
 
 # optional dependencies
 pcsc = { version = "2", optional = true }
+clap = { version = "4.3.1", features = ["derive"] }
 
 [[example]]
 name = "pcsc"
+required-features = ["pcsc"]
+
+[[bin]]
+name = "cktap-cli"
 required-features = ["pcsc"]

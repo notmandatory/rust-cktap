@@ -6,7 +6,6 @@ use rust_cktap::commands::{
     // Read,
     Wait,
 };
-use rust_cktap::rand_nonce;
 use rust_cktap::{pcsc, rand_chaincode, CkTapCard};
 
 use secp256k1::rand;
@@ -48,8 +47,7 @@ fn main() -> Result<(), Error> {
             // let read_result = card.read(cvc.clone())?;
             // dbg!(read_result);
 
-            let nonce = rand_nonce(rng);
-            dbg!(ts.check_certificate(nonce.to_vec()).unwrap().name());
+            dbg!(ts.check_certificate().unwrap().name());
 
             //let dump_result = card.dump();
 
@@ -96,8 +94,7 @@ fn main() -> Result<(), Error> {
             // let derive_result = card.derive()?;
             // dbg!(&derive_result);
 
-            let nonce = rand_nonce(rng);
-            dbg!(sc.check_certificate(nonce.to_vec()).unwrap().name());
+            dbg!(sc.check_certificate().unwrap().name());
 
             // let nfc_result = card.nfc()?;
             // dbg!(nfc_result);
