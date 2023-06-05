@@ -20,6 +20,7 @@ jobs:
         rust:
           - version: stable
           - version: 1.56.0 # MSRV
+            msrv: true
         features:
           - --no-default-features
           - --all-features
@@ -36,6 +37,9 @@ jobs:
         uses: Swatinem/rust-cache@v2.2.1
       - name: Install libpcsclite-dev
         run: sudo apt install libpcsclite-dev
+      - name: Use MSRV Cargo.toml # Don't include "cli" in workspace if using MSRV
+        if: ${{ matrix.rust.msrv }}
+        run: cp Cargo.toml.MSRV Cargo.toml
       - name: Build
         run: cargo build ${{ matrix.features }}
       - name: Test
