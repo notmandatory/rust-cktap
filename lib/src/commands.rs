@@ -4,8 +4,10 @@ use crate::{CkTapCard, SatsCard, TapSigner};
 
 use secp256k1::ecdh::SharedSecret;
 use secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
+use secp256k1::hashes::hex::ToHex;
 use secp256k1::hashes::{sha256, Hash};
 use secp256k1::{rand, All, Message, PublicKey, Secp256k1, SecretKey};
+
 use std::convert::TryFrom;
 
 use std::fmt::Debug;
@@ -87,20 +89,79 @@ where
     T: CkTransport,
 {
     fn requires_auth(&self) -> bool;
+    fn slot(&self) -> Option<u8>;
 
     fn read(&mut self, cvc: Option<String>) -> Result<ReadResponse, Error> {
-        let cmd = if self.requires_auth() {
-            let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc.unwrap(), &ReadCommand::name());
-            ReadCommand::authenticated(self.card_nonce().clone(), epubkey, xcvc)
+        let card_nonce = self.card_nonce().clone();
+        let rng = &mut rand::thread_rng();
+        let nonce = rand_nonce(rng).to_vec();
+ 
+        if self.requires_auth() {
+            let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc.unwrap(), &ReadCommand::name());
+            let cmd = ReadCommand::authenticated(nonce.clone(), epubkey, xcvc);
+
+            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);   
+            if let Ok(response) = &read_response {
+                let session_key = SharedSecret::new(self.pubkey(), &eprivkey);
+
+                let pubkey = response.pubkey.clone().iter().zip(session_key.as_ref()).map(|(x, y)| x ^ y).collect();
+
+                self.verify_signature(
+                    response.sig.clone(),
+                    card_nonce,
+                    nonce,
+                    pubkey,
+                )?;
+                self.set_card_nonce(response.card_nonce.clone());
+            }
+            read_response
         } else {
-            ReadCommand::unauthenticated(self.card_nonce().clone())
-        };
-        let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);
-        if let Ok(response) = &read_response {
-            self.set_card_nonce(response.card_nonce.clone());
+            let cmd = ReadCommand::unauthenticated(nonce.clone());
+
+            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);   
+            if let Ok(response) = &read_response {
+                self.verify_signature(
+                    response.sig.clone(),
+                    card_nonce,
+                    nonce,
+                    response.pubkey.clone(),
+                )?;
+                self.set_card_nonce(response.card_nonce.clone());
+            }
+            read_response
         }
-        read_response
+        
     }
+
+    fn verify_signature(
+        &mut self,
+        signature: Vec<u8>,
+        card_nonce: Vec<u8>,
+        app_nonce: Vec<u8>,
+        pubkey: Vec<u8>,
+    ) -> Result<(), secp256k1::Error> {
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend("OPENDIME".as_bytes());
+        message_bytes.extend(card_nonce);
+        message_bytes.extend(app_nonce);
+        if let Some(slot) = self.slot() {
+            message_bytes.push(slot);
+        }
+        let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
+        let signature = Signature::from_compact(signature.as_slice())
+            .expect("Failed to construct ECDSA signature from check response");
+        
+        // SatsCard
+        let pubkey = PublicKey::from_slice(pubkey.as_slice()).unwrap();
+
+        self.secp()
+            .verify_ecdsa(&message, &signature, &pubkey)
+
+    }
+
+    
+
+    
 }
 
 pub trait Wait<T>: Authentication<T>

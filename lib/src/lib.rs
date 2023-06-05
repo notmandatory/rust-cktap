@@ -4,6 +4,7 @@ use secp256k1::rand::Rng;
 use secp256k1::{All, Message, PublicKey, Secp256k1};
 use std::fmt;
 use std::fmt::Debug;
+// use bech32::{self, FromBase32, ToBase32, Variant};
 
 pub mod apdu;
 pub mod commands;
@@ -137,6 +138,10 @@ impl<T: CkTransport> Wait<T> for TapSigner<T> {}
 impl<T: CkTransport> Read<T> for TapSigner<T> {
     fn requires_auth(&self) -> bool {
         true
+    }
+
+    fn slot(&self) -> Option<u8> {
+        None
     }
 }
 
@@ -285,6 +290,17 @@ impl<T: CkTransport> SatsCard<T> {
         let dump_command = DumpCommand::new(slot, epubkey, xcvc);
         self.transport.transmit(dump_command)
     }
+
+    pub fn address(&mut self) -> Result<String, Error> {
+        // let pubkey = self.read(None).unwrap().pubkey;
+        // // let hrp = match self.testnet() { }
+        // let encoded = bech32::encode("bc", pubkey.to_base32(), Variant::Bech32);
+        // match encoded {
+        //     Ok(e) => Ok(e),
+        //     Err(_) => panic!("Failed to encoded pubkey")
+        // }
+        todo!()
+    }
 }
 
 impl<T: CkTransport> Wait<T> for SatsCard<T> {}
@@ -292,6 +308,9 @@ impl<T: CkTransport> Wait<T> for SatsCard<T> {}
 impl<T: CkTransport> Read<T> for SatsCard<T> {
     fn requires_auth(&self) -> bool {
         false
+    }
+    fn slot(&self) -> Option<u8> {
+        Some(self.slots.0 as u8)
     }
 }
 

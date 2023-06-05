@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 
+use crate::commands::Authentication;
+
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
@@ -225,6 +227,12 @@ pub struct ReadResponse {
 }
 
 impl ResponseApdu for ReadResponse {}
+
+impl fmt::Display for ReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "pubkey: {}", self.pubkey.to_hex())
+    }
+}
 
 impl Debug for ReadResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
