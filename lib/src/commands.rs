@@ -4,7 +4,6 @@ use crate::{CkTapCard, SatsCard, TapSigner};
 
 use secp256k1::ecdh::SharedSecret;
 use secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
-use secp256k1::hashes::hex::ToHex;
 use secp256k1::hashes::{sha256, Hash};
 use secp256k1::{rand, All, Message, PublicKey, Secp256k1, SecretKey};
 
@@ -95,73 +94,51 @@ where
         let card_nonce = self.card_nonce().clone();
         let rng = &mut rand::thread_rng();
         let nonce = rand_nonce(rng).to_vec();
- 
+
         if self.requires_auth() {
-            let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc.unwrap(), &ReadCommand::name());
+            let (eprivkey, epubkey, xcvc) =
+                self.calc_ekeys_xcvc(cvc.unwrap(), &ReadCommand::name());
             let cmd = ReadCommand::authenticated(nonce.clone(), epubkey, xcvc);
 
-            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);   
+            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);
             if let Ok(response) = &read_response {
+                let message = self.message_digest(card_nonce, nonce);
+                let signature = Signature::from_compact(response.sig.as_slice())
+                    .expect("Failed to construct ECDSA signature from check response");
                 let session_key = SharedSecret::new(self.pubkey(), &eprivkey);
-
-                let pubkey = response.pubkey.clone().iter().zip(session_key.as_ref()).map(|(x, y)| x ^ y).collect();
-
-                self.verify_signature(
-                    response.sig.clone(),
-                    card_nonce,
-                    nonce,
-                    pubkey,
-                )?;
+                let pubkey = unzip(&mut response.pubkey.clone(), session_key)?;
+                self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
                 self.set_card_nonce(response.card_nonce.clone());
             }
             read_response
         } else {
             let cmd = ReadCommand::unauthenticated(nonce.clone());
-
-            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);   
+            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);
             if let Ok(response) = &read_response {
-                self.verify_signature(
-                    response.sig.clone(),
-                    card_nonce,
-                    nonce,
-                    response.pubkey.clone(),
-                )?;
+                let message = self.message_digest(card_nonce, nonce);
+                let signature = Signature::from_compact(response.sig.as_slice())
+                    .expect("Failed to construct ECDSA signature from check response");
+                let pubkey: PublicKey =
+                    PublicKey::from_slice(response.pubkey.clone().as_slice()).unwrap();
+                self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
                 self.set_card_nonce(response.card_nonce.clone());
             }
             read_response
         }
-        
     }
 
-    fn verify_signature(
-        &mut self,
-        signature: Vec<u8>,
-        card_nonce: Vec<u8>,
-        app_nonce: Vec<u8>,
-        pubkey: Vec<u8>,
-    ) -> Result<(), secp256k1::Error> {
+    fn message_digest(&self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message {
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
         message_bytes.extend(app_nonce);
         if let Some(slot) = self.slot() {
             message_bytes.push(slot);
+        } else {
+            message_bytes.push(0);
         }
-        let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
-        let signature = Signature::from_compact(signature.as_slice())
-            .expect("Failed to construct ECDSA signature from check response");
-        
-        // SatsCard
-        let pubkey = PublicKey::from_slice(pubkey.as_slice()).unwrap();
-
-        self.secp()
-            .verify_ecdsa(&message, &signature, &pubkey)
-
+        Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice())
     }
-
-    
-
-    
 }
 
 pub trait Wait<T>: Authentication<T>
@@ -246,6 +223,18 @@ where
         self.secp()
             .verify_ecdsa(&message, &signature, self.pubkey())
     }
+}
+
+fn unzip(encoded: &mut Vec<u8>, session_key: SharedSecret) -> Result<PublicKey, secp256k1::Error> {
+    let session_key = session_key.as_ref(); // 32 bytes
+    let mut pubkey = encoded.clone();
+    let xor_bytes = encoded.split_off(1);
+    let xor_bytes = xor_bytes
+        .iter()
+        .zip(session_key.as_ref())
+        .map(|(x, y)| x ^ y);
+    pubkey.splice(1..33, xor_bytes);
+    PublicKey::from_slice(pubkey.as_slice())
 }
 
 // #[cfg(test)]

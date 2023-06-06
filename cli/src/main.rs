@@ -18,6 +18,8 @@ struct SatsCardCli {
 /// Commands supported by SatsCard cards
 #[derive(Subcommand)]
 enum SatsCardCommand {
+    /// Show the card status
+    Debug,
     /// Show current deposit address
     Address,
     /// Check this card was made by Coinkite: Verifies a certificate chain up to root factory key.
@@ -38,6 +40,8 @@ struct TapSignerCli {
 /// Commands supported by TapSigner cards
 #[derive(Subcommand)]
 enum TapSignerCommand {
+    /// Show the card status
+    Debug,
     /// Check this card was made by Coinkite: Verifies a certificate chain up to root factory key.
     Certs,
     /// Read the pubkey (requires CVC)
@@ -47,11 +51,14 @@ enum TapSignerCommand {
 fn main() -> Result<(), Error> {
     // figure out what type of card we have before parsing cli args
     let mut card = pcsc::find_first()?;
-    
+
     match &mut card {
         CkTapCard::SatsCard(sc) => {
             let cli = SatsCardCli::parse();
             match cli.command {
+                SatsCardCommand::Debug => {
+                    dbg!(&sc);
+                }
                 SatsCardCommand::Address => println!("Address: {}", sc.address().unwrap()),
                 SatsCardCommand::Certs => check_cert(sc),
                 SatsCardCommand::Read => read(sc, None),
@@ -60,6 +67,9 @@ fn main() -> Result<(), Error> {
         CkTapCard::TapSigner(ts) | CkTapCard::SatsChip(ts) => {
             let cli = TapSignerCli::parse();
             match cli.command {
+                TapSignerCommand::Debug => {
+                    dbg!(&ts);
+                }
                 TapSignerCommand::Certs => check_cert(ts),
                 TapSignerCommand::Read => read(ts, Some(cvc())),
             }
@@ -88,7 +98,7 @@ fn read<T: CkTransport>(card: &mut dyn Read<T>, cvc: Option<String>) {
         Err(e) => {
             dbg!(&e);
             println!("Failed to read with error: ")
-        },
+        }
     }
 }
 

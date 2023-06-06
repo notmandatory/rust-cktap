@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 
-use crate::commands::Authentication;
-
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
@@ -243,12 +241,6 @@ impl Debug for ReadResponse {
             .finish()
     }
 }
-
-// impl ReadResponse {
-//     pub fn pubkey(&self) -> PublicKey {
-//         PublicKey::from_slice(self.pubkey.as_slice()).unwrap()
-//     }
-// }
 
 // Checks payment address derivation: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#satscard-checks-payment-address-derivation
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
