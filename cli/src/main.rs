@@ -26,6 +26,8 @@ enum SatsCardCommand {
     Certs,
     /// Read the pubkey
     Read,
+    /// Derive a public key at the m/0 path, the first non-hardened derived key
+    Derive,
 }
 
 /// TapSigner CLI
@@ -46,6 +48,12 @@ enum TapSignerCommand {
     Certs,
     /// Read the pubkey (requires CVC)
     Read,
+    /// Derive a public key at the given hardened path
+    Derive {
+        /// path, eg. for 84'/0'/0'/* use 84,0,0
+        #[clap(short, long, value_delimiter = ',', num_args = 1..)]
+        path: Vec<u32>,
+    },
 }
 
 fn main() -> Result<(), Error> {
@@ -62,6 +70,10 @@ fn main() -> Result<(), Error> {
                 SatsCardCommand::Address => println!("Address: {}", sc.address().unwrap()),
                 SatsCardCommand::Certs => check_cert(sc),
                 SatsCardCommand::Read => read(sc, None),
+                SatsCardCommand::Derive => {
+                    let response = &sc.derive();
+                    dbg!(response);
+                }
             }
         }
         CkTapCard::TapSigner(ts) | CkTapCard::SatsChip(ts) => {
@@ -72,6 +84,10 @@ fn main() -> Result<(), Error> {
                 }
                 TapSignerCommand::Certs => check_cert(ts),
                 TapSignerCommand::Read => read(ts, Some(cvc())),
+                TapSignerCommand::Derive { path } => {
+                    let response = &ts.derive(path, cvc());
+                    dbg!(response);
+                }
             }
         }
     }

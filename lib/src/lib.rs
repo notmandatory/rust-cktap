@@ -1,7 +1,7 @@
 use secp256k1::hashes::sha256;
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
-use secp256k1::{All, Message, PublicKey, Secp256k1};
+use secp256k1::{rand, All, Message, PublicKey, Secp256k1};
 use std::fmt;
 use std::fmt::Debug;
 // use bech32::{self, FromBase32, ToBase32, Variant};
@@ -61,6 +61,10 @@ impl<T: CkTransport> Authentication<T> for TapSigner<T> {
         &self.pubkey
     }
 
+    fn slot(&self) -> Option<u8> {
+        None
+    }
+
     fn card_nonce(&self) -> &Vec<u8> {
         &self.card_nonce
     }
@@ -114,22 +118,26 @@ impl<T: CkTransport> TapSigner<T> {
         new_response
     }
 
-    pub fn derive(&mut self, path: Vec<usize>, cvc: String) -> Result<DeriveResponse, Error> {
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &DeriveCommand::name());
-        let cmd = DeriveCommand::for_tapsigner(self.card_nonce.clone(), path, epubkey, xcvc);
-        let resp: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
-        if let Ok(derive_resp) = &resp {
-            self.card_nonce = derive_resp.card_nonce.clone();
-
-            // TODO: verify reponse
-            // The digest:
-            // b'OPENDIME' (8 bytes)
-            // (card_nonce - 16 bytes)
-            // (nonce from command - 16 bytes)
-            // (chain_code - 32 bytes)
-            // must be signed by the master_pubkey
+    pub fn derive(&mut self, path: Vec<u32>, cvc: String) -> Result<DeriveResponse, Error> {
+        // set most significant bit to 1 to represent hardened path steps
+        let path = path.iter().map(|p| p ^ (1 << 31)).collect();
+        let app_nonce = rand_nonce();
+        let (_eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &DeriveCommand::name());
+        let cmd = DeriveCommand::for_tapsigner(app_nonce, path, epubkey, xcvc);
+        let derive_response: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
+        if let Ok(response) = &derive_response {
+            self.card_nonce = response.card_nonce.clone();
+            // TODO why doesn't below verify_sig work?
+            // self.verify_sig(
+            //     app_nonce,
+            //     &response.sig,
+            //     Some(&eprivkey),
+            //     &response.pubkey.clone().expect("derive response pubkey"),
+            //     &response.chain_code,
+            // )?;
+            self.set_card_nonce(response.card_nonce.clone());
         }
-        resp
+        derive_response
     }
 }
 
@@ -138,10 +146,6 @@ impl<T: CkTransport> Wait<T> for TapSigner<T> {}
 impl<T: CkTransport> Read<T> for TapSigner<T> {
     fn requires_auth(&self) -> bool {
         true
-    }
-
-    fn slot(&self) -> Option<u8> {
-        None
     }
 }
 
@@ -190,6 +194,10 @@ impl<T: CkTransport> Authentication<T> for SatsCard<T> {
 
     fn pubkey(&self) -> &PublicKey {
         &self.pubkey
+    }
+
+    fn slot(&self) -> Option<u8> {
+        Some(self.slots.0 as u8)
     }
 
     fn card_nonce(&self) -> &Vec<u8> {
@@ -309,9 +317,6 @@ impl<T: CkTransport> Read<T> for SatsCard<T> {
     fn requires_auth(&self) -> bool {
         false
     }
-    fn slot(&self) -> Option<u8> {
-        Some(self.slots.0 as u8)
-    }
 }
 
 impl<T: CkTransport> Certificate<T> for SatsCard<T> {
@@ -351,8 +356,9 @@ pub fn rand_chaincode(rng: &mut ThreadRng) -> [u8; 32] {
     chain_code
 }
 
-pub fn rand_nonce(rng: &mut ThreadRng) -> [u8; 16] {
+pub fn rand_nonce() -> Vec<u8> {
+    let rng = &mut rand::thread_rng();
     let mut nonce = [0u8; 16];
     rng.fill(&mut nonce);
-    nonce
+    nonce.to_vec()
 }

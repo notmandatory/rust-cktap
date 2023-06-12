@@ -15,6 +15,7 @@ use std::fmt::Debug;
 pub trait Authentication<T: CkTransport> {
     fn secp(&self) -> &Secp256k1<All>;
     fn pubkey(&self) -> &PublicKey;
+    fn slot(&self) -> Option<u8>;
     fn card_nonce(&self) -> &Vec<u8>;
     fn set_card_nonce(&mut self, new_nonce: Vec<u8>);
     fn auth_delay(&self) -> &Option<usize>;
@@ -43,6 +44,37 @@ pub trait Authentication<T: CkTransport> {
             .collect();
         let xcvc = cvc_bytes.iter().zip(mask).map(|(x, y)| x ^ y).collect();
         (eprivkey, epubkey, xcvc)
+    }
+
+    fn verify_sig(
+        &self,
+        app_nonce: Vec<u8>,
+        sig: &Vec<u8>,
+        eprivkey: Option<&SecretKey>,
+        pubkey: &Vec<u8>,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        let message = self.message_digest(app_nonce, data.to_owned());
+        let signature = Signature::from_compact(sig.as_slice())?;
+        let pubkey = if let Some(epk) = eprivkey {
+            let session_key = SharedSecret::new(self.pubkey(), epk);
+            unzip(&mut pubkey.clone(), session_key).unwrap()
+        } else {
+            PublicKey::from_slice(pubkey.as_slice()).unwrap()
+        };
+        self.secp()
+            .verify_ecdsa(&message, &signature, &pubkey)
+            .map_err(|e| e.into())
+    }
+
+    fn message_digest(&self, app_nonce: Vec<u8>, data: Vec<u8>) -> Message {
+        let card_nonce = self.card_nonce().clone();
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend("OPENDIME".as_bytes());
+        message_bytes.extend(card_nonce);
+        message_bytes.extend(app_nonce);
+        message_bytes.extend(&data);
+        Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice())
     }
 }
 
@@ -88,56 +120,36 @@ where
     T: CkTransport,
 {
     fn requires_auth(&self) -> bool;
-    fn slot(&self) -> Option<u8>;
 
     fn read(&mut self, cvc: Option<String>) -> Result<ReadResponse, Error> {
-        let card_nonce = self.card_nonce().clone();
-        let rng = &mut rand::thread_rng();
-        let nonce = rand_nonce(rng).to_vec();
-
+        let app_nonce = rand_nonce().to_vec();
         if self.requires_auth() {
             let (eprivkey, epubkey, xcvc) =
                 self.calc_ekeys_xcvc(cvc.unwrap(), &ReadCommand::name());
-            let cmd = ReadCommand::authenticated(nonce.clone(), epubkey, xcvc);
-
+            let cmd = ReadCommand::authenticated(app_nonce.clone(), epubkey, xcvc);
             let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);
             if let Ok(response) = &read_response {
-                let message = self.message_digest(card_nonce, nonce);
-                let signature = Signature::from_compact(response.sig.as_slice())
-                    .expect("Failed to construct ECDSA signature from check response");
-                let session_key = SharedSecret::new(self.pubkey(), &eprivkey);
-                let pubkey = unzip(&mut response.pubkey.clone(), session_key)?;
-                self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
+                let slot = self.slot().unwrap_or_default();
+                self.verify_sig(
+                    app_nonce,
+                    &response.sig,
+                    Some(&eprivkey),
+                    &response.pubkey,
+                    &[slot],
+                )?;
                 self.set_card_nonce(response.card_nonce.clone());
             }
             read_response
         } else {
-            let cmd = ReadCommand::unauthenticated(nonce.clone());
+            let cmd = ReadCommand::unauthenticated(app_nonce.clone());
             let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd);
             if let Ok(response) = &read_response {
-                let message = self.message_digest(card_nonce, nonce);
-                let signature = Signature::from_compact(response.sig.as_slice())
-                    .expect("Failed to construct ECDSA signature from check response");
-                let pubkey: PublicKey =
-                    PublicKey::from_slice(response.pubkey.clone().as_slice()).unwrap();
-                self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
+                let slot = self.slot().unwrap_or_default();
+                self.verify_sig(app_nonce, &response.sig, None, &response.pubkey, &[slot])?;
                 self.set_card_nonce(response.card_nonce.clone());
             }
             read_response
         }
-    }
-
-    fn message_digest(&self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message {
-        let mut message_bytes: Vec<u8> = Vec::new();
-        message_bytes.extend("OPENDIME".as_bytes());
-        message_bytes.extend(card_nonce);
-        message_bytes.extend(app_nonce);
-        if let Some(slot) = self.slot() {
-            message_bytes.push(slot);
-        } else {
-            message_bytes.push(0);
-        }
-        Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice())
     }
 }
 
@@ -175,9 +187,7 @@ where
     fn message_digest(&mut self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message;
 
     fn check_certificate(&mut self) -> Result<FactoryRootKey, Error> {
-        let rng = &mut rand::thread_rng();
-        let nonce = rand_nonce(rng).to_vec();
-
+        let nonce = rand_nonce().to_vec();
         let card_nonce = self.card_nonce().clone();
 
         let certs_cmd = CertsCommand::default();

@@ -249,7 +249,7 @@ pub struct DeriveCommand {
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
-    path: Option<Vec<usize>>,
+    path: Vec<u32>, // tapsigner: empty list for `m` case (a no-op)
     #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
@@ -267,7 +267,7 @@ impl DeriveCommand {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
-            path: None,
+            path: vec![], // unused
             epubkey: None,
             xcvc: None,
         }
@@ -275,14 +275,14 @@ impl DeriveCommand {
 
     pub fn for_tapsigner(
         nonce: Vec<u8>,
-        path: Vec<usize>,
+        path: Vec<u32>,
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
-            path: Some(path),
+            path,
             epubkey: Some(epubkey.serialize().to_vec()),
             xcvc: Some(xcvc),
         }
@@ -291,12 +291,20 @@ impl DeriveCommand {
 
 #[derive(Deserialize, Clone)]
 pub struct DeriveResponse {
+    /// signature over a bunch of fields using derived private key
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>, // 64 byes
+    pub sig: Vec<u8>, // 64 bytes
+    /// chain code of derived subkey
     #[serde(with = "serde_bytes")]
     pub chain_code: Vec<u8>, // 32 bytes
+    /// master public key in effect (`m`)
     #[serde(with = "serde_bytes")]
     pub master_pubkey: Vec<u8>, // 33 bytes
+    /// derived public key for indicated path
+    #[serde(with = "serde_bytes")]
+    #[serde(default = "Option::default")]
+    pub pubkey: Option<Vec<u8>>, // 33 bytes
+    /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
     pub card_nonce: Vec<u8>, // 16 bytes
 }
@@ -309,6 +317,7 @@ impl Debug for DeriveResponse {
             .field("sig", &self.sig.to_hex())
             .field("chain_code", &self.chain_code.to_hex())
             .field("master_pubkey", &self.master_pubkey.to_hex())
+            .field("pubkey", &self.pubkey.clone().map(|pk| pk.to_hex()))
             .field("card_nonce", &self.card_nonce.to_hex())
             .finish()
     }
