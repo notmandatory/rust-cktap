@@ -35,6 +35,8 @@ enum SatsCardCommand {
     New,
     /// Unseal the current slot.
     Unseal,
+    /// Get the payment address and verify it follows from the chain code and master public key
+    Derive,
 }
 
 /// TapSigner CLI
@@ -91,6 +93,9 @@ fn main() -> Result<(), Error> {
                     let response = &sc.unseal(slot, cvc());
                     dbg!(response);
                 }
+                SatsCardCommand::Derive => { 
+                    dbg!(sc.derive());
+                },
             }
         }
         CkTapCard::TapSigner(ts) | CkTapCard::SatsChip(ts) => {

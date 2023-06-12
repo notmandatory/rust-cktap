@@ -251,9 +251,12 @@ pub struct DeriveCommand {
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
+    /// # Tapsigner: derivation path, can be empty list for `m` case (a no-op)
     path: Option<Vec<usize>>,
+    /// app's ephemeral public key
     #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
+    /// encrypted CVC value
     #[serde(with = "serde_bytes")]
     xcvc: Option<Vec<u8>>,
 }

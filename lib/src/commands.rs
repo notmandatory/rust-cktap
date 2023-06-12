@@ -225,6 +225,13 @@ where
     }
 }
 
+// pub trait Derive<T>: Authentication<T>
+// where
+//     T: CkTransport,
+// {
+    
+// }
+
 fn unzip(encoded: &mut Vec<u8>, session_key: SharedSecret) -> Result<PublicKey, secp256k1::Error> {
     let session_key = session_key.as_ref(); // 32 bytes
     let mut pubkey = encoded.clone();

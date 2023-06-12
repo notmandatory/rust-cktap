@@ -1,14 +1,19 @@
 extern crate core;
 pub extern crate secp256k1;
 
+use secp256k1::ecdsa::Signature;
 use secp256k1::hashes::sha256;
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
+use secp256k1::rand;
 use secp256k1::{All, Message, PublicKey, Secp256k1};
 use std::fmt;
 use std::fmt::Debug;
 // use bech32::{self, FromBase32, ToBase32, Variant};
-
+use bitcoin::{
+    bip32::{ExtendedPubKey, ChildNumber, ChainCode, Fingerprint},
+    Network,
+};
 pub mod apdu;
 pub mod commands;
 pub mod factory_root_key;
@@ -256,20 +261,49 @@ impl<T: CkTransport> SatsCard<T> {
         }
         new_response
     }
+    // fn message_digest(&mut self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message {
+    //     b'OPENDIME' (8 bytes)
+    //     (card_nonce - 16 bytes)
+    //     (nonce from command - 16 bytes)
+    //     (chain_code - 32 bytes)
+    // }
 
     pub fn derive(&mut self) -> Result<DeriveResponse, Error> {
-        let cmd = DeriveCommand::for_satscard(self.card_nonce.clone());
-        let resp: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
-        if let Ok(derive_resp) = &resp {
-            self.card_nonce = derive_resp.card_nonce.clone();
+        let rng = &mut rand::thread_rng();
+        let nonce = rand_nonce(rng).to_vec();
+        let card_nonce = self.card_nonce().clone();
 
-            // TODO: verify reponse
-            // The digest:
-            // b'OPENDIME' (8 bytes)
-            // (card_nonce - 16 bytes)
-            // (nonce from command - 16 bytes)
-            // (chain_code - 32 bytes)
-            // must be signed by the master_pubkey
+        let cmd = DeriveCommand::for_satscard(nonce.clone());
+        let resp: Result<DeriveResponse, Error> = self.transport().transmit(cmd);
+
+        if let Ok(r) = &resp {
+            // Verify signature
+            let mut message_bytes: Vec<u8> = Vec::new();
+            message_bytes.extend("OPENDIME".as_bytes());
+            message_bytes.extend(card_nonce);
+            message_bytes.extend(nonce);
+            message_bytes.extend(r.chain_code.clone());
+            let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
+            let signature = Signature::from_compact(r.sig.as_slice())
+                .expect("Failed to construct ECDSA signature from check response");
+            let pubkey = PublicKey::from_slice(r.master_pubkey.as_slice())?;
+            self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
+
+            // Construct BIP-32 XPUB from master_pubkey + chain_code
+            // let xpub = bitcoin::bip32::ExtendedPubKey(r.master_pubkey, r.chain_code)
+            // let child = ChildNumber::from_normal_idx(0)?;
+            // let pubkey = bitcoin::secp256k1::PublicKey::from_slice(r.master_pubkey.as_slice())?;
+            // let xpub = ExtendedPubKey {
+            //     network: Network::Bitcoin,
+            //     depth: 0,
+            //     parent_fingerprint: Fingerprint::from([0x00, 0x00, 0x00, 0x00]),
+            //     child_number: child,
+            //     public_key: pubkey,
+            //     chain_code: ChainCode::from(*r.chain_code.as_slice()),
+            // };
+            // The payment address the card shares (i.e., the slot's pubkey) must equal the BIP-32 derived key (m/0) constructed from that XPUB.
+
+            self.set_card_nonce(r.card_nonce.clone());
         }
         resp
     }
@@ -365,3 +399,20 @@ pub fn rand_nonce(rng: &mut ThreadRng) -> [u8; 16] {
     rng.fill(&mut nonce);
     nonce
 }
+
+// Errors
+// #[derive(Debug)]
+// pub enum Error {
+    
+//     // #[cfg(feature = "pcsc")]
+//     // PcSc(String),
+// }
+
+// impl<T> From<ciborium::de::Error<T>> for Error
+// where
+//     T: Debug,
+// {
+//     fn from(e: ciborium::de::Error<T>) -> Self {
+//         Error::CiborDe(e.to_string())
+//     }
+// }
