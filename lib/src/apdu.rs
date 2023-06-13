@@ -31,6 +31,8 @@ pub enum Error {
     UnknownCardType(String),
     #[cfg(feature = "pcsc")]
     PcSc(String),
+    #[cfg(feature = "emulator")]
+    Emulator(String),
 }
 
 impl<T> From<ciborium::de::Error<T>> for Error
@@ -141,7 +143,7 @@ pub struct StatusResponse {
     pub proto: usize,
     pub ver: String,
     pub birth: usize,
-    pub slots: Option<(usize, usize)>,
+    pub slots: Option<(u8, u8)>,
     pub addr: Option<String>,
     pub tapsigner: Option<bool>,
     pub satschip: Option<bool>,
@@ -604,21 +606,27 @@ impl ResponseApdu for WaitResponse {}
 pub struct NewCommand {
     /// 'new' command
     cmd: String,
-    /// (optional: default zero) slot to be affected, must equal currently-active slot number
-    slot: usize,
-    /// app's entropy share to be applied to new slot (optional on SATSCARD), 32 bytes
+    /// (use 0 for TapSigner) slot to be affected, must equal currently-active slot number
+    slot: u8,
+    /// app's entropy share to be applied to new slot (optional on SATSCARD)
     #[serde(with = "serde_bytes")]
-    chain_code: Option<Vec<u8>>,
-    /// app's ephemeral public key, 33 bytes
+    chain_code: Option<Vec<u8>>, // 32 bytes
+    /// app's ephemeral public key
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>,
-    /// encrypted CVC value, 6 bytes
+    epubkey: Vec<u8>, // 33 bytes
+    /// encrypted CVC value
     #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>,
+    xcvc: Vec<u8>, // 6 bytes
 }
 
 impl NewCommand {
-    pub fn new(slot: usize, chain_code: Option<Vec<u8>>, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
+    pub fn new(
+        slot: Option<u8>,
+        chain_code: Option<Vec<u8>>,
+        epubkey: Vec<u8>,
+        xcvc: Vec<u8>,
+    ) -> Self {
+        let slot = slot.unwrap_or_default();
         NewCommand {
             cmd: Self::name(),
             slot,
@@ -650,10 +658,10 @@ impl CommandApdu for NewCommand {
 #[derive(Deserialize, Clone, Debug)]
 pub struct NewResponse {
     /// slot just made
-    pub slot: usize,
-    /// new nonce value, for NEXT command (not this one), 16 bytes
+    pub slot: u8,
+    /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: Vec<u8>, // 16 bytes
 }
 
 impl ResponseApdu for NewResponse {}
@@ -667,7 +675,7 @@ pub struct UnsealCommand {
     /// 'unseal' command
     cmd: String,
     /// slot to be unsealed, must equal currently-active slot number
-    slot: usize,
+    slot: u8,
     /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
     epubkey: Vec<u8>,
@@ -677,7 +685,7 @@ pub struct UnsealCommand {
 }
 
 impl UnsealCommand {
-    pub fn new(slot: usize, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
+    pub fn new(slot: u8, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
         UnsealCommand {
             cmd: Self::name(),
             slot,
@@ -697,7 +705,7 @@ impl CommandApdu for UnsealCommand {
 #[derive(Deserialize, Clone, Debug)]
 pub struct UnsealResponse {
     /// slot just unsealed
-    pub slot: usize,
+    pub slot: u8,
     /// private key for spending (for addr), 32 bytes
     /// The private keys are encrypted, XORed with the session key
     #[serde(with = "serde_bytes")]

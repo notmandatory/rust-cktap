@@ -1,3 +1,6 @@
+extern crate core;
+pub extern crate secp256k1;
+
 use secp256k1::hashes::sha256;
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
@@ -10,6 +13,8 @@ pub mod apdu;
 pub mod commands;
 pub mod factory_root_key;
 
+#[cfg(feature = "emulator")]
+pub mod emulator;
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
 
@@ -102,11 +107,10 @@ impl<T: CkTransport> TapSigner<T> {
         }
     }
 
-    pub fn init(&mut self, chain_code: Vec<u8>, cvc: String) -> Result<NewResponse, Error> {
-        let chain_code = Some(chain_code);
+    pub fn init(&mut self, chain_code: Option<Vec<u8>>, cvc: String) -> Result<NewResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &NewCommand::name());
         let epubkey = epubkey.serialize().to_vec();
-        let new_command = NewCommand::new(0, chain_code, epubkey, xcvc);
+        let new_command = NewCommand::new(Some(0), chain_code, epubkey, xcvc);
         let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command);
         if let Ok(response) = &new_response {
             self.card_nonce = response.card_nonce.clone();
@@ -176,7 +180,7 @@ pub struct SatsCard<T: CkTransport> {
     pub proto: usize,
     pub ver: String,
     pub birth: usize,
-    pub slots: (usize, usize),
+    pub slots: (u8, u8),
     pub addr: Option<String>,
     pub pubkey: PublicKey,
     pub card_nonce: Vec<u8>, // 16 bytes
@@ -238,17 +242,17 @@ impl<T: CkTransport> SatsCard<T> {
 
     pub fn new_slot(
         &mut self,
-        slot: usize,
-        chain_code: Vec<u8>,
+        slot: u8,
+        chain_code: Option<Vec<u8>>,
         cvc: String,
     ) -> Result<NewResponse, Error> {
-        let chain_code = Some(chain_code);
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &NewCommand::name());
         let epubkey = epubkey.serialize().to_vec();
-        let new_command = NewCommand::new(slot, chain_code, epubkey, xcvc);
+        let new_command = NewCommand::new(Some(slot), chain_code, epubkey, xcvc);
         let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command);
         if let Ok(response) = &new_response {
             self.card_nonce = response.card_nonce.clone();
+            self.slots.0 = response.slot;
         }
         new_response
     }
@@ -270,11 +274,16 @@ impl<T: CkTransport> SatsCard<T> {
         resp
     }
 
-    pub fn unseal(&self, slot: usize, cvc: String) -> Result<UnsealResponse, Error> {
+    pub fn unseal(&mut self, slot: u8, cvc: String) -> Result<UnsealResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &UnsealCommand::name());
         let epubkey = epubkey.serialize().to_vec();
         let unseal_command = UnsealCommand::new(slot, epubkey, xcvc);
-        self.transport.transmit(unseal_command)
+        let unseal_response: Result<UnsealResponse, Error> =
+            self.transport.transmit(unseal_command);
+        if let Ok(response) = &unseal_response {
+            self.set_card_nonce(response.card_nonce.clone())
+        }
+        unseal_response
     }
 
     pub fn dump(&self, slot: usize, cvc: Option<String>) -> Result<DumpResponse, Error> {
@@ -310,7 +319,7 @@ impl<T: CkTransport> Read<T> for SatsCard<T> {
         false
     }
     fn slot(&self) -> Option<u8> {
-        Some(self.slots.0 as u8)
+        Some(self.slots.0)
     }
 }
 

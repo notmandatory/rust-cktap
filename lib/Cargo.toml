@@ -13,7 +13,10 @@ secp256k1 = { version = "0.26.0", features = ["rand-std", "bitcoin-hashes-std", 
 
 # optional dependencies
 pcsc = { version = "2", optional = true }
-# bech32 = "0.9.1"
+
+[features]
+default = []
+emulator = []
 
 [[example]]
 name = "pcsc"

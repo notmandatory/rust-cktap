@@ -2,7 +2,12 @@
 use clap::{Parser, Subcommand};
 use rpassword::read_password;
 use rust_cktap::commands::{CkTransport, Read};
-use rust_cktap::{apdu::Error, commands::Certificate, pcsc, CkTapCard};
+#[cfg(feature = "emulator")]
+use rust_cktap::emulator;
+#[cfg(not(feature = "emulator"))]
+use rust_cktap::pcsc;
+use rust_cktap::secp256k1::rand;
+use rust_cktap::{apdu::Error, commands::Certificate, rand_chaincode, CkTapCard};
 use std::io;
 use std::io::Write;
 
@@ -26,6 +31,10 @@ enum SatsCardCommand {
     Certs,
     /// Read the pubkey
     Read,
+    /// Pick a new private key and start a fresh slot. Current slot must be unsealed.
+    New,
+    /// Unseal the current slot.
+    Unseal,
 }
 
 /// TapSigner CLI
@@ -46,11 +55,20 @@ enum TapSignerCommand {
     Certs,
     /// Read the pubkey (requires CVC)
     Read,
+    /// This command is used once to initialize a new card.
+    Init,
 }
 
 fn main() -> Result<(), Error> {
     // figure out what type of card we have before parsing cli args
+    #[cfg(not(feature = "emulator"))]
     let mut card = pcsc::find_first()?;
+
+    // if emulator feature enabled override pcsc card
+    #[cfg(feature = "emulator")]
+    let mut card = emulator::find_emulator()?;
+
+    let rng = &mut rand::thread_rng();
 
     match &mut card {
         CkTapCard::SatsCard(sc) => {
@@ -62,6 +80,17 @@ fn main() -> Result<(), Error> {
                 SatsCardCommand::Address => println!("Address: {}", sc.address().unwrap()),
                 SatsCardCommand::Certs => check_cert(sc),
                 SatsCardCommand::Read => read(sc, None),
+                SatsCardCommand::New => {
+                    let slot = sc.slot().expect("current slot number");
+                    let chain_code = Some(rand_chaincode(rng).to_vec());
+                    let response = &sc.new_slot(slot, chain_code, cvc());
+                    dbg!(response);
+                }
+                SatsCardCommand::Unseal => {
+                    let slot = sc.slot().expect("current slot number");
+                    let response = &sc.unseal(slot, cvc());
+                    dbg!(response);
+                }
             }
         }
         CkTapCard::TapSigner(ts) | CkTapCard::SatsChip(ts) => {
@@ -72,6 +101,11 @@ fn main() -> Result<(), Error> {
                 }
                 TapSignerCommand::Certs => check_cert(ts),
                 TapSignerCommand::Read => read(ts, Some(cvc())),
+                TapSignerCommand::Init => {
+                    let chain_code = Some(rand_chaincode(rng).to_vec());
+                    let response = &ts.init(chain_code, cvc());
+                    dbg!(response);
+                }
             }
         }
     }

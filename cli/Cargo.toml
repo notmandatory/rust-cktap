@@ -10,3 +10,6 @@ rust-cktap = { path = "../lib", features = ["pcsc"] }
 pcsc = { version = "2" }
 clap = { version = "4.3.1", features = ["derive"] }
 rpassword = { version = "7.2" }
+
+[features]
+emulator = ["rust-cktap/emulator"]

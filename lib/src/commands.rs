@@ -237,26 +237,57 @@ fn unzip(encoded: &mut Vec<u8>, session_key: SharedSecret) -> Result<PublicKey, 
     PublicKey::from_slice(pubkey.as_slice())
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(feature = "emulator")]
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn test_tapsigner_signature() {
-//         let card_pubkey = PublicKey::from_slice(
-//             &from_hex("0335170d9b853440080b0e5d6129f985ebeb919e7a90f28a5fa15c7987ec986a6b")
-//                 .as_slice(),
-//         )
-//         .map_err(|e| Error::CiborValue(e.to_string()))
-//         .unwrap();
-//         let signature: Vec<u8> = from_hex("44721225a42eb3496cc38858adf8fafde9a752776d36c719aaa4f255ab121a0864be7d21eb47a5db88e3879b53ea74794d3e9503cc9b56b8bf9f948324198c30");
-//         let card_nonce: Vec<u8> = from_hex("fd4c5d2c9d9c5a647cbc0b2b79ffef91");
-//         let app_nonce: Vec<u8> = from_hex("273faf8a0b270f697bcb6c90dc8cd4ba");
-//         let secp = Secp256k1::new();
+    use crate::emulator::find_emulator;
+    use crate::emulator::CVC;
+    use crate::rand_chaincode;
 
-//         assert!(
-//             verify_tapsigner_signature(&card_pubkey, signature, card_nonce, app_nonce, &secp)
-//                 .is_ok()
-//         );
-//     }
-// }
+    #[test]
+    fn test_new_command() {
+        let rng = &mut rand::thread_rng();
+        let chain_code = Some(rand_chaincode(rng).to_vec());
+
+        let emulator = find_emulator().unwrap();
+        match emulator {
+            CkTapCard::SatsCard(mut sc) => {
+                let current_slot = sc.slots.0;
+                let response = sc.unseal(current_slot, CVC.to_string());
+                assert!(response.is_ok());
+                let response = sc.new_slot(current_slot + 1, chain_code, CVC.to_string());
+                assert!(response.is_ok());
+                assert_eq!(sc.slots.0, current_slot + 1);
+            }
+            CkTapCard::TapSigner(mut ts) => {
+                let response = ts.init(chain_code, CVC.to_string());
+                assert!(response.is_ok())
+            }
+            CkTapCard::SatsChip(mut sc) => {
+                let response = sc.init(chain_code, CVC.to_string());
+                assert!(response.is_ok())
+            }
+        };
+    }
+
+    // #[test]
+    // fn test_tapsigner_signature() {
+    //     let card_pubkey = PublicKey::from_slice(
+    //         &from_hex("0335170d9b853440080b0e5d6129f985ebeb919e7a90f28a5fa15c7987ec986a6b")
+    //             .as_slice(),
+    //     )
+    //     .map_err(|e| Error::CiborValue(e.to_string()))
+    //     .unwrap();
+    //     let signature: Vec<u8> = from_hex("44721225a42eb3496cc38858adf8fafde9a752776d36c719aaa4f255ab121a0864be7d21eb47a5db88e3879b53ea74794d3e9503cc9b56b8bf9f948324198c30");
+    //     let card_nonce: Vec<u8> = from_hex("fd4c5d2c9d9c5a647cbc0b2b79ffef91");
+    //     let app_nonce: Vec<u8> = from_hex("273faf8a0b270f697bcb6c90dc8cd4ba");
+    //     let secp = Secp256k1::new();
+    //
+    //     assert!(
+    //         verify_tapsigner_signature(&card_pubkey, signature, card_nonce, app_nonce, &secp)
+    //             .is_ok()
+    //     );
+    // }
+}

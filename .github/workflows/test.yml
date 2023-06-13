@@ -23,7 +23,7 @@ jobs:
             msrv: true
         features:
           - --no-default-features
-          - --all-features
+          - --features default
     steps:
       - name: checkout
         uses: actions/checkout@v2

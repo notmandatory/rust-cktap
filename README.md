@@ -9,7 +9,7 @@ for use with [SATSCARD], [TAPSIGNER], and [SATSCHIP] products.
 
 This project provides PC/SC APDU message encoding and decoding, cvc authentication, certificate chain verification, and card response verification. 
 
-It is up to the crate user to send and receive the raw cktap APDU messages via NFC to the card by implementing the `Transport` trait. An example implementation is provided using the optional rust `pcsc` crate. Mobile users are expected to implement `Transport` using the iOS or Android provided libraries.
+It is up to the crate user to send and receive the raw cktap APDU messages via NFC to the card by implementing the `CkTransport` trait. An example implementation is provided using the optional rust `pcsc` crate. Mobile users are expected to implement `CkTransport` using the iOS or Android provided libraries.
 
 ### Supported Features
 
@@ -41,7 +41,14 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 - [x] [xpub](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#xpub)
 - [ ] [backup](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#backup)
 
-### Desktop Example
+### Automated Testing with Emulator
+
+1. Install and start [cktap emulator](https://github.com/coinkite/coinkite-tap-proto/blob/master/emulator/README.md)
+   - TapSigner: `./ecard.py emulate -t --no-init`
+   - SatsCard: `./ecard.py emulate -s`
+2. run tests: `cargo test --features emulator`
+
+### Manual Testing with real cards
 
 #### Prerequisites
 
@@ -51,12 +58,6 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 Install vendor PCSC driver
 3. Connect NFC reader to desktop system
 4. Place SATSCARD, TAPSIGNER, or SATSCHIP on reader
-
-#### Run example
-
-   ```
-   cargo run -p rust-cktap --example pcsc --features pcsc
-   ```
  
 #### Run CLI
 
