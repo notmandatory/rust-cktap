@@ -3,17 +3,14 @@ pub extern crate secp256k1;
 
 use secp256k1::ecdsa::Signature;
 use secp256k1::hashes::sha256;
+use secp256k1::rand;
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
-use secp256k1::rand;
 use secp256k1::{All, Message, PublicKey, Secp256k1};
+// use core::slice::SlicePattern;
 use std::fmt;
 use std::fmt::Debug;
-// use bech32::{self, FromBase32, ToBase32, Variant};
-use bitcoin::{
-    bip32::{ExtendedPubKey, ChildNumber, ChainCode, Fingerprint},
-    Network,
-};
+
 pub mod apdu;
 pub mod commands;
 pub mod factory_root_key;
@@ -123,22 +120,35 @@ impl<T: CkTransport> TapSigner<T> {
         new_response
     }
 
-    pub fn derive(&mut self, path: Vec<usize>, cvc: String) -> Result<DeriveResponse, Error> {
+    pub fn derive(&mut self, path: Vec<u32>, cvc: String) -> Result<DeriveResponse, Error> {
+        // set most significant bit to 1 to represent hardened path steps
+        let path = path.iter().map(|p| p ^ (1 << 31)).collect();
+        let app_nonce = rand_nonce();
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &DeriveCommand::name());
-        let cmd = DeriveCommand::for_tapsigner(self.card_nonce.clone(), path, epubkey, xcvc);
-        let resp: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
-        if let Ok(derive_resp) = &resp {
-            self.card_nonce = derive_resp.card_nonce.clone();
-
-            // TODO: verify reponse
-            // The digest:
-            // b'OPENDIME' (8 bytes)
-            // (card_nonce - 16 bytes)
-            // (nonce from command - 16 bytes)
-            // (chain_code - 32 bytes)
-            // must be signed by the master_pubkey
+        let cmd = DeriveCommand::for_tapsigner(app_nonce.clone(), path, epubkey, xcvc);
+        let derive_response: Result<DeriveResponse, Error> = self.transport.transmit(cmd);
+        if let Ok(response) = &derive_response {
+            let card_nonce = self.card_nonce();
+            let sig = &response.sig;
+            let mut message_bytes: Vec<u8> = Vec::new();
+            message_bytes.extend("OPENDIME".as_bytes());
+            message_bytes.extend(card_nonce);
+            message_bytes.extend(app_nonce);
+            message_bytes.extend(&response.chain_code);
+            let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
+            let signature = Signature::from_compact(sig.as_slice())?;
+            let pubkey = PublicKey::from_slice(
+                response
+                    .pubkey
+                    .clone()
+                    .expect("derive response pubkey")
+                    .as_slice(),
+            )
+            .unwrap();
+            self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
+            self.set_card_nonce(response.card_nonce.clone());
         }
-        resp
+        derive_response
     }
 }
 
@@ -261,22 +271,17 @@ impl<T: CkTransport> SatsCard<T> {
         }
         new_response
     }
-    // fn message_digest(&mut self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message {
-    //     b'OPENDIME' (8 bytes)
-    //     (card_nonce - 16 bytes)
-    //     (nonce from command - 16 bytes)
-    //     (chain_code - 32 bytes)
-    // }
 
     pub fn derive(&mut self) -> Result<DeriveResponse, Error> {
-        let rng = &mut rand::thread_rng();
-        let nonce = rand_nonce(rng).to_vec();
+        let nonce = rand_nonce();
         let card_nonce = self.card_nonce().clone();
 
         let cmd = DeriveCommand::for_satscard(nonce.clone());
         let resp: Result<DeriveResponse, Error> = self.transport().transmit(cmd);
 
         if let Ok(r) = &resp {
+            self.set_card_nonce(r.card_nonce.clone());
+
             // Verify signature
             let mut message_bytes: Vec<u8> = Vec::new();
             message_bytes.extend("OPENDIME".as_bytes());
@@ -290,20 +295,27 @@ impl<T: CkTransport> SatsCard<T> {
             self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
 
             // Construct BIP-32 XPUB from master_pubkey + chain_code
-            // let xpub = bitcoin::bip32::ExtendedPubKey(r.master_pubkey, r.chain_code)
-            // let child = ChildNumber::from_normal_idx(0)?;
-            // let pubkey = bitcoin::secp256k1::PublicKey::from_slice(r.master_pubkey.as_slice())?;
+
+            // let chain_code: [u8; 32] = r.chain_code.clone().try_into().unwrap();
+
+            // use bitcoin::bip32
             // let xpub = ExtendedPubKey {
             //     network: Network::Bitcoin,
             //     depth: 0,
-            //     parent_fingerprint: Fingerprint::from([0x00, 0x00, 0x00, 0x00]),
-            //     child_number: child,
-            //     public_key: pubkey,
-            //     chain_code: ChainCode::from(*r.chain_code.as_slice()),
+            //     parent_fingerprint: Fingerprint::default(),
+            //     child_number: ChildNumber::from_normal_idx(0).unwrap(),
+            //     public_key: bitcoin::secp256k1::PublicKey::from_slice(r.master_pubkey.as_slice()).unwrap(),
+            //     chain_code: ChainCode::from(chain_code),
             // };
-            // The payment address the card shares (i.e., the slot's pubkey) must equal the BIP-32 derived key (m/0) constructed from that XPUB.
 
-            self.set_card_nonce(r.card_nonce.clone());
+            // The payment address the card shares (i.e., the slot's pubkey) must equal the BIP-32 derived key (m/0) constructed from that XPUB.
+            // &xpub.
+            // dbg!(&xpub.to_pub().to_string());
+            // let derived_pubkey = PublicKey::from_str(&xpub.to_pub().inner.to_string())?;
+            // dbg!(&derived_pubkey.to_string());
+            // let slot = self.read(None)?.pubkey(None);
+            // dbg!(&slot.to_string());
+            // assert_eq!(&derived_pubkey, &slot);
         }
         resp
     }
@@ -394,16 +406,17 @@ pub fn rand_chaincode(rng: &mut ThreadRng) -> [u8; 32] {
     chain_code
 }
 
-pub fn rand_nonce(rng: &mut ThreadRng) -> [u8; 16] {
+pub fn rand_nonce() -> Vec<u8> {
+    let rng = &mut rand::thread_rng();
     let mut nonce = [0u8; 16];
     rng.fill(&mut nonce);
-    nonce
+    nonce.to_vec()
 }
 
 // Errors
 // #[derive(Debug)]
 // pub enum Error {
-    
+
 //     // #[cfg(feature = "pcsc")]
 //     // PcSc(String),
 // }

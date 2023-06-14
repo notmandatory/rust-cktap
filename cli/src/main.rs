@@ -59,6 +59,12 @@ enum TapSignerCommand {
     Read,
     /// This command is used once to initialize a new card.
     Init,
+    /// Derive a public key at the given hardened path
+    Derive {
+        /// path, eg. for 84'/0'/0'/* use 84,0,0
+        #[clap(short, long, value_delimiter = ',', num_args = 1..)]
+        path: Vec<u32>,
+    },
 }
 
 fn main() -> Result<(), Error> {
@@ -93,9 +99,9 @@ fn main() -> Result<(), Error> {
                     let response = &sc.unseal(slot, cvc());
                     dbg!(response);
                 }
-                SatsCardCommand::Derive => { 
-                    dbg!(sc.derive());
-                },
+                SatsCardCommand::Derive => {
+                    dbg!(&sc.derive());
+                }
             }
         }
         CkTapCard::TapSigner(ts) | CkTapCard::SatsChip(ts) => {
@@ -110,6 +116,9 @@ fn main() -> Result<(), Error> {
                     let chain_code = rand_chaincode(rng).to_vec();
                     let response = &ts.init(chain_code, cvc());
                     dbg!(response);
+                }
+                TapSignerCommand::Derive { path } => {
+                    dbg!(&ts.derive(path, cvc()));
                 }
             }
         }

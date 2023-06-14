@@ -3,12 +3,15 @@
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
+use secp256k1::ecdh::SharedSecret;
 use secp256k1::hashes::hex::ToHex;
 use secp256k1::PublicKey;
 use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
+
+use secp256k1::ecdsa::Signature;
 
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
@@ -228,6 +231,35 @@ pub struct ReadResponse {
 
 impl ResponseApdu for ReadResponse {}
 
+impl ReadResponse {
+    pub fn signature(&self) -> Result<Signature, Error> {
+        Signature::from_compact(self.sig.as_slice()).map_err(|e| Error::CiborValue(e.to_string()))
+        // .expect("Failed to construct ECDSA signature from ReadResponse")
+    }
+
+    pub fn pubkey(&self, session_key: Option<SharedSecret>) -> PublicKey {
+        let pubkey = if let Some(sk) = session_key {
+            unzip(&self.pubkey, sk)
+        } else {
+            self.pubkey.clone()
+        };
+        PublicKey::from_slice(pubkey.as_slice())
+            .expect("Failed to construct a PublicKey from ReadResponse")
+    }
+}
+
+fn unzip(encoded: &[u8], session_key: SharedSecret) -> Vec<u8> {
+    let zipped_bytes = encoded.to_owned().split_off(1);
+    let unzipped_bytes = zipped_bytes
+        .iter()
+        .zip(session_key.as_ref())
+        .map(|(x, y)| x ^ y);
+
+    let mut pubkey = encoded.to_owned();
+    pubkey.splice(1..33, unzipped_bytes);
+    pubkey
+}
+
 impl fmt::Display for ReadResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "pubkey: {}", self.pubkey.to_hex())
@@ -251,8 +283,7 @@ pub struct DeriveCommand {
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
-    /// # Tapsigner: derivation path, can be empty list for `m` case (a no-op)
-    path: Option<Vec<usize>>,
+    path: Vec<u32>, // tapsigner: empty list for `m` case (a no-op)
     /// app's ephemeral public key
     #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
@@ -272,7 +303,7 @@ impl DeriveCommand {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
-            path: None,
+            path: vec![],
             epubkey: None,
             xcvc: None,
         }
@@ -280,14 +311,14 @@ impl DeriveCommand {
 
     pub fn for_tapsigner(
         nonce: Vec<u8>,
-        path: Vec<usize>,
+        path: Vec<u32>,
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
-            path: Some(path),
+            path,
             epubkey: Some(epubkey.serialize().to_vec()),
             xcvc: Some(xcvc),
         }
@@ -297,11 +328,18 @@ impl DeriveCommand {
 #[derive(Deserialize, Clone)]
 pub struct DeriveResponse {
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>, // 64 byes
+    pub sig: Vec<u8>, // 64 bytes
+    /// chain code of derived subkey
     #[serde(with = "serde_bytes")]
     pub chain_code: Vec<u8>, // 32 bytes
+    /// master public key in effect (`m`)
     #[serde(with = "serde_bytes")]
     pub master_pubkey: Vec<u8>, // 33 bytes
+    /// derived public key for indicated path
+    #[serde(with = "serde_bytes")]
+    #[serde(default = "Option::default")]
+    pub pubkey: Option<Vec<u8>>, // 33 bytes
+    /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
     pub card_nonce: Vec<u8>, // 16 bytes
 }
@@ -314,6 +352,7 @@ impl Debug for DeriveResponse {
             .field("sig", &self.sig.to_hex())
             .field("chain_code", &self.chain_code.to_hex())
             .field("master_pubkey", &self.master_pubkey.to_hex())
+            .field("pubkey", &self.pubkey.clone().map(|pk| pk.to_hex()))
             .field("card_nonce", &self.card_nonce.to_hex())
             .finish()
     }
