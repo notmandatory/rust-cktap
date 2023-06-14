@@ -36,7 +36,7 @@ fn main() -> Result<(), Error> {
             // only do this once per card!
             if ts.path.is_none() {
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = ts.init(Some(chain_code), cvc)?;
+                let new_result = ts.init(chain_code, cvc)?;
                 dbg!(new_result);
             }
 
@@ -66,7 +66,7 @@ fn main() -> Result<(), Error> {
             // only do this once per card!
             if chip.path.is_none() {
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = chip.init(Some(chain_code), get_cvc())?;
+                let new_result = chip.init(chain_code, get_cvc())?;
                 dbg!(new_result);
             }
 

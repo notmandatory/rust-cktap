@@ -107,10 +107,10 @@ impl<T: CkTransport> TapSigner<T> {
         }
     }
 
-    pub fn init(&mut self, chain_code: Option<Vec<u8>>, cvc: String) -> Result<NewResponse, Error> {
+    pub fn init(&mut self, chain_code: Vec<u8>, cvc: String) -> Result<NewResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &NewCommand::name());
         let epubkey = epubkey.serialize().to_vec();
-        let new_command = NewCommand::new(Some(0), chain_code, epubkey, xcvc);
+        let new_command = NewCommand::new(Some(0), Some(chain_code), epubkey, xcvc);
         let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command);
         if let Ok(response) = &new_response {
             self.card_nonce = response.card_nonce.clone();

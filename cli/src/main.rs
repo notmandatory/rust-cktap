@@ -102,7 +102,7 @@ fn main() -> Result<(), Error> {
                 TapSignerCommand::Certs => check_cert(ts),
                 TapSignerCommand::Read => read(ts, Some(cvc())),
                 TapSignerCommand::Init => {
-                    let chain_code = Some(rand_chaincode(rng).to_vec());
+                    let chain_code = rand_chaincode(rng).to_vec();
                     let response = &ts.init(chain_code, cvc());
                     dbg!(response);
                 }

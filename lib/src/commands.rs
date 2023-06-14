@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn test_new_command() {
         let rng = &mut rand::thread_rng();
-        let chain_code = Some(rand_chaincode(rng).to_vec());
+        let chain_code = rand_chaincode(rng).to_vec();
 
         let emulator = find_emulator().unwrap();
         match emulator {
@@ -257,7 +257,14 @@ mod tests {
                 let current_slot = sc.slots.0;
                 let response = sc.unseal(current_slot, CVC.to_string());
                 assert!(response.is_ok());
-                let response = sc.new_slot(current_slot + 1, chain_code, CVC.to_string());
+                let response = sc.new_slot(current_slot + 1, Some(chain_code), CVC.to_string());
+                assert!(response.is_ok());
+                assert_eq!(sc.slots.0, current_slot + 1);
+                // test with no new chain_code
+                let current_slot = sc.slots.0;
+                let response = sc.unseal(current_slot, CVC.to_string());
+                assert!(response.is_ok());
+                let response = sc.new_slot(current_slot + 1, None, CVC.to_string());
                 assert!(response.is_ok());
                 assert_eq!(sc.slots.0, current_slot + 1);
             }
