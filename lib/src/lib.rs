@@ -137,14 +137,8 @@ impl<T: CkTransport> TapSigner<T> {
             message_bytes.extend(&response.chain_code);
             let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
             let signature = Signature::from_compact(sig.as_slice())?;
-            let pubkey = PublicKey::from_slice(
-                response
-                    .pubkey
-                    .clone()
-                    .expect("derive response pubkey")
-                    .as_slice(),
-            )
-            .unwrap();
+            let pubkey = PublicKey::from_slice(response.master_pubkey.as_slice())?;
+            // TODO fix verify when a derivation path is used, currently only works if no path given
             self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
             self.set_card_nonce(response.card_nonce.clone());
         }
@@ -293,29 +287,6 @@ impl<T: CkTransport> SatsCard<T> {
                 .expect("Failed to construct ECDSA signature from check response");
             let pubkey = PublicKey::from_slice(r.master_pubkey.as_slice())?;
             self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
-
-            // Construct BIP-32 XPUB from master_pubkey + chain_code
-
-            // let chain_code: [u8; 32] = r.chain_code.clone().try_into().unwrap();
-
-            // use bitcoin::bip32
-            // let xpub = ExtendedPubKey {
-            //     network: Network::Bitcoin,
-            //     depth: 0,
-            //     parent_fingerprint: Fingerprint::default(),
-            //     child_number: ChildNumber::from_normal_idx(0).unwrap(),
-            //     public_key: bitcoin::secp256k1::PublicKey::from_slice(r.master_pubkey.as_slice()).unwrap(),
-            //     chain_code: ChainCode::from(chain_code),
-            // };
-
-            // The payment address the card shares (i.e., the slot's pubkey) must equal the BIP-32 derived key (m/0) constructed from that XPUB.
-            // &xpub.
-            // dbg!(&xpub.to_pub().to_string());
-            // let derived_pubkey = PublicKey::from_str(&xpub.to_pub().inner.to_string())?;
-            // dbg!(&derived_pubkey.to_string());
-            // let slot = self.read(None)?.pubkey(None);
-            // dbg!(&slot.to_string());
-            // assert_eq!(&derived_pubkey, &slot);
         }
         resp
     }

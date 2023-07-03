@@ -10,7 +10,6 @@ ciborium = "0.2.0"
 serde = "1"
 serde_bytes = "0.11"
 secp256k1 = { version = "0.26.0", features = ["rand-std", "bitcoin-hashes-std", "recovery"] }
-bitcoin = "0.30.0"
 
 # optional dependencies
 pcsc = { version = "2", optional = true }
