@@ -4,14 +4,13 @@ use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
 use secp256k1::ecdh::SharedSecret;
+use secp256k1::ecdsa::Signature;
 use secp256k1::hashes::hex::ToHex;
-use secp256k1::PublicKey;
+use secp256k1::{PublicKey, SecretKey, XOnlyPublicKey};
 use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-
-use secp256k1::ecdsa::Signature;
 
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
@@ -708,6 +707,12 @@ pub struct NewResponse {
 
 impl ResponseApdu for NewResponse {}
 
+impl fmt::Display for NewResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "slot {}", self.slot)
+    }
+}
+
 /// Unseal Command
 ///
 /// Unseal the current slot.
@@ -767,6 +772,18 @@ pub struct UnsealResponse {
 }
 
 impl ResponseApdu for UnsealResponse {}
+
+impl fmt::Display for UnsealResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let master = XOnlyPublicKey::from_slice(self.master_pk.as_slice()).unwrap();
+        let pubkey = PublicKey::from_slice(self.pubkey.as_slice()).unwrap();
+        let privkey = SecretKey::from_slice(self.privkey.as_slice()).unwrap();
+        writeln!(f, "slot: {}", self.slot)?;
+        writeln!(f, "master_pk: {}", master)?;
+        writeln!(f, "pubkey: {}", pubkey)?;
+        writeln!(f, "privkey: {}", privkey.display_secret())
+    }
+}
 
 /// Dump Command
 ///

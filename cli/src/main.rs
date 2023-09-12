@@ -91,13 +91,13 @@ fn main() -> Result<(), Error> {
                 SatsCardCommand::New => {
                     let slot = sc.slot().expect("current slot number");
                     let chain_code = Some(rand_chaincode(rng).to_vec());
-                    let response = &sc.new_slot(slot, chain_code, cvc());
-                    dbg!(response);
+                    let response = &sc.new_slot(slot, chain_code, cvc()).unwrap();
+                    println!("{}", response)
                 }
                 SatsCardCommand::Unseal => {
                     let slot = sc.slot().expect("current slot number");
-                    let response = &sc.unseal(slot, cvc());
-                    dbg!(response);
+                    let response = &sc.unseal(slot, cvc()).unwrap();
+                    println!("{}", response)
                 }
                 SatsCardCommand::Derive => {
                     dbg!(&sc.derive());
