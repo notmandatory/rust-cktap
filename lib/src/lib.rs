@@ -1,3 +1,5 @@
+uniffi::include_scaffolding!("rust-cktap");
+
 extern crate core;
 pub extern crate secp256k1;
 

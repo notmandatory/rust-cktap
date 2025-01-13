@@ -5,6 +5,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "rust_cktap"
+
 [dependencies]
 ciborium = "0.2.0"
 serde = "1"
@@ -13,6 +17,11 @@ secp256k1 = { version = "0.26.0", features = ["rand-std", "bitcoin-hashes-std", 
 
 # optional dependencies
 pcsc = { version = "2", optional = true }
+uniffi = { version = "=0.28.0", features = ["cli"] }
+thiserror = "1.0.58"
+
+[build-dependencies]
+uniffi = { version = "=0.28.0", features = ["build"] }
 
 [features]
 default = []
@@ -21,3 +30,7 @@ emulator = []
 [[example]]
 name = "pcsc"
 required-features = ["pcsc"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/uniffi-bindgen.rs"

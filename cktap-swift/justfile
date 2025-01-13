@@ -1,0 +1,11 @@
+default:
+    just --list
+
+build:
+    bash ./build-xcframework.sh
+
+clean:
+    rm -rf ../rust-cktap-ffi/target/
+
+test:
+    swift test
