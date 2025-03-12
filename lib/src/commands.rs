@@ -33,6 +33,7 @@ pub trait Authentication<T: CkTransport> {
         let session_key = SharedSecret::new(pubkey, &eprivkey);
 
         let md = sha256::Hash::hash(card_nonce_command.as_slice());
+        let md: &[u8; 32] = md.as_ref();
 
         let mask: Vec<u8> = session_key
             .as_ref()
@@ -127,7 +128,9 @@ where
         } else {
             message_bytes.push(0);
         }
-        Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice())
+
+        let hash = sha256::Hash::hash(message_bytes.as_slice());
+        Message::from_digest(hash.to_byte_array())
     }
 }
 
@@ -190,10 +193,12 @@ where
                 39..=42 => 39, // Segwit Bech32
                 _ => panic!("Unrecognized BIP-137 address"),
             };
-            let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by).unwrap();
+            let rec_id = RecoveryId::try_from((sig[0] as i32) - subtract_by).unwrap();
             let (_, sig) = sig.split_at(1);
             let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
-            let md = Message::from_hashed_data::<sha256::Hash>(&pubkey.serialize());
+
+            let pubkey_hash = sha256::Hash::hash(&pubkey.serialize_uncompressed());
+            let md = Message::from_digest(pubkey_hash.to_byte_array());
             pubkey = self.secp().recover_ecdsa(&md, &rec_sig).unwrap();
         }
 

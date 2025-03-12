@@ -4,7 +4,7 @@ extern crate core;
 pub extern crate secp256k1;
 
 use secp256k1::ecdsa::Signature;
-use secp256k1::hashes::sha256;
+use secp256k1::hashes::{sha256, Hash as _};
 use secp256k1::rand;
 use secp256k1::rand::rngs::ThreadRng;
 use secp256k1::rand::Rng;
@@ -137,7 +137,10 @@ impl<T: CkTransport> TapSigner<T> {
             message_bytes.extend(card_nonce);
             message_bytes.extend(app_nonce);
             message_bytes.extend(&response.chain_code);
-            let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
+
+            let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+            let message = Message::from_digest(message_bytes_hash.to_byte_array());
+
             let signature = Signature::from_compact(sig.as_slice())?;
             let pubkey = PublicKey::from_slice(response.master_pubkey.as_slice())?;
             // TODO fix verify when a derivation path is used, currently only works if no path given
@@ -166,7 +169,9 @@ impl<T: CkTransport> Certificate<T> for TapSigner<T> {
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
         message_bytes.extend(app_nonce);
-        Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice())
+
+        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+        Message::from_digest(message_bytes_hash.to_byte_array())
     }
 }
 
@@ -284,7 +289,9 @@ impl<T: CkTransport> SatsCard<T> {
             message_bytes.extend(card_nonce);
             message_bytes.extend(nonce);
             message_bytes.extend(r.chain_code.clone());
-            let message = Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice());
+
+            let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+            let message = Message::from_digest(message_bytes_hash.to_byte_array());
             let signature = Signature::from_compact(r.sig.as_slice())
                 .expect("Failed to construct ECDSA signature from check response");
             let pubkey = PublicKey::from_slice(r.master_pubkey.as_slice())?;
@@ -352,7 +359,9 @@ impl<T: CkTransport> Certificate<T> for SatsCard<T> {
             let pubkey = self.read(None).unwrap().pubkey;
             message_bytes.extend(pubkey);
         }
-        Message::from_hashed_data::<sha256::Hash>(message_bytes.as_slice())
+
+        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+        Message::from_digest(message_bytes_hash.to_byte_array())
     }
 }
 

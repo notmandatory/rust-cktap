@@ -1,5 +1,5 @@
 use crate::apdu::Error;
-use secp256k1::hashes::hex::ToHex;
+use secp256k1::hashes::hex::DisplayHex;
 use secp256k1::PublicKey;
 use std::convert::TryFrom;
 use std::fmt;
@@ -21,7 +21,7 @@ impl TryFrom<PublicKey> for FactoryRootKey {
     type Error = Error;
 
     fn try_from(pubkey: PublicKey) -> Result<Self, Error> {
-        match pubkey.serialize().to_hex().as_str() {
+        match pubkey.serialize().to_lower_hex_string().as_str() {
             PUB_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Pub(pubkey)),
             DEV_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Dev(pubkey)),
             _ => Err(Error::IncorrectSignature(

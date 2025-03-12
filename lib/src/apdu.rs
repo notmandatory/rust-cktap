@@ -5,7 +5,7 @@ use ciborium::ser::into_writer;
 use ciborium::value::Value;
 use secp256k1::ecdh::SharedSecret;
 use secp256k1::ecdsa::Signature;
-use secp256k1::hashes::hex::ToHex;
+use secp256k1::hashes::hex::DisplayHex;
 use secp256k1::{PublicKey, SecretKey, XOnlyPublicKey};
 use serde;
 use serde::{Deserialize, Serialize};
@@ -261,16 +261,16 @@ fn unzip(encoded: &[u8], session_key: SharedSecret) -> Vec<u8> {
 
 impl fmt::Display for ReadResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "pubkey: {}", self.pubkey.to_hex())
+        write!(f, "pubkey: {}", self.pubkey.to_lower_hex_string())
     }
 }
 
 impl Debug for ReadResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("ReadResponse")
-            .field("sig", &self.sig.to_hex())
-            .field("pubkey", &self.pubkey.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("sig", &self.sig.to_lower_hex_string())
+            .field("pubkey", &self.pubkey.to_lower_hex_string())
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -348,11 +348,14 @@ impl ResponseApdu for DeriveResponse {}
 impl Debug for DeriveResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("DeriveResponse")
-            .field("sig", &self.sig.to_hex())
-            .field("chain_code", &self.chain_code.to_hex())
-            .field("master_pubkey", &self.master_pubkey.to_hex())
-            .field("pubkey", &self.pubkey.clone().map(|pk| pk.to_hex()))
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("sig", &self.sig.to_lower_hex_string())
+            .field("chain_code", &self.chain_code.to_lower_hex_string())
+            .field("master_pubkey", &self.master_pubkey.to_lower_hex_string())
+            .field(
+                "pubkey",
+                &self.pubkey.clone().map(|pk| pk.to_lower_hex_string()),
+            )
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -407,7 +410,11 @@ impl CertsResponse {
 
 impl Debug for CertsResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let cert_hexes: Vec<String> = self.cert_chain().iter().map(|key| key.to_hex()).collect();
+        let cert_hexes: Vec<String> = self
+            .cert_chain()
+            .iter()
+            .map(|key| key.to_lower_hex_string())
+            .collect();
         f.debug_struct("CertsResponse")
             .field("cert_chain", &cert_hexes)
             .finish()
@@ -459,8 +466,8 @@ impl ResponseApdu for CheckResponse {}
 impl Debug for CheckResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("CheckResponse")
-            .field("auth_sig", &self.auth_sig.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("auth_sig", &self.auth_sig.to_lower_hex_string())
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -577,9 +584,9 @@ impl Debug for SignResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("SignResponse")
             .field("slot", &self.slot)
-            .field("sig", &self.sig.to_hex())
-            .field("pubkey", &self.pubkey.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("sig", &self.sig.to_lower_hex_string())
+            .field("pubkey", &self.pubkey.to_lower_hex_string())
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -913,8 +920,8 @@ impl ResponseApdu for XpubResponse {}
 impl Debug for XpubResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("XpubResponse")
-            .field("xpub", &self.xpub.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("xpub", &self.xpub.to_lower_hex_string())
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
