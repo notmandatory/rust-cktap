@@ -67,14 +67,15 @@ enum TapSignerCommand {
     },
 }
 
-fn main() -> Result<(), Error> {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     // figure out what type of card we have before parsing cli args
     #[cfg(not(feature = "emulator"))]
-    let mut card = pcsc::find_first()?;
+    let mut card = pcsc::find_first().await?;
 
     // if emulator feature enabled override pcsc card
     #[cfg(feature = "emulator")]
-    let mut card = emulator::find_emulator()?;
+    let mut card = emulator::find_emulator().await?;
 
     let rng = &mut rand::thread_rng();
 
@@ -86,21 +87,21 @@ fn main() -> Result<(), Error> {
                     dbg!(&sc);
                 }
                 SatsCardCommand::Address => println!("Address: {}", sc.address().unwrap()),
-                SatsCardCommand::Certs => check_cert(sc),
-                SatsCardCommand::Read => read(sc, None),
+                SatsCardCommand::Certs => check_cert(sc).await,
+                SatsCardCommand::Read => read(sc, None).await,
                 SatsCardCommand::New => {
                     let slot = sc.slot().expect("current slot number");
                     let chain_code = Some(rand_chaincode(rng).to_vec());
-                    let response = &sc.new_slot(slot, chain_code, cvc()).unwrap();
+                    let response = &sc.new_slot(slot, chain_code, cvc()).await.unwrap();
                     println!("{}", response)
                 }
                 SatsCardCommand::Unseal => {
                     let slot = sc.slot().expect("current slot number");
-                    let response = &sc.unseal(slot, cvc()).unwrap();
+                    let response = &sc.unseal(slot, cvc()).await.unwrap();
                     println!("{}", response)
                 }
                 SatsCardCommand::Derive => {
-                    dbg!(&sc.derive());
+                    dbg!(&sc.derive().await);
                 }
             }
         }
@@ -110,15 +111,15 @@ fn main() -> Result<(), Error> {
                 TapSignerCommand::Debug => {
                     dbg!(&ts);
                 }
-                TapSignerCommand::Certs => check_cert(ts),
-                TapSignerCommand::Read => read(ts, Some(cvc())),
+                TapSignerCommand::Certs => check_cert(ts).await,
+                TapSignerCommand::Read => read(ts, Some(cvc())).await,
                 TapSignerCommand::Init => {
                     let chain_code = rand_chaincode(rng).to_vec();
-                    let response = &ts.init(chain_code, cvc());
+                    let response = &ts.init(chain_code, cvc()).await;
                     dbg!(response);
                 }
                 TapSignerCommand::Derive { path } => {
-                    dbg!(&ts.derive(path, cvc()));
+                    dbg!(&ts.derive(path, cvc()).await);
                 }
             }
         }
@@ -129,8 +130,8 @@ fn main() -> Result<(), Error> {
 
 // handler functions for each command
 
-fn check_cert<T: CkTransport>(card: &mut dyn Certificate<T>) {
-    if let Ok(k) = card.check_certificate() {
+async fn check_cert<T: CkTransport>(card: &mut dyn Certificate<T>) {
+    if let Ok(k) = card.check_certificate().await {
         println!(
             "Genuine card from Coinkite.\nHas cert signed by: {}",
             k.name()
@@ -140,8 +141,8 @@ fn check_cert<T: CkTransport>(card: &mut dyn Certificate<T>) {
     }
 }
 
-fn read<T: CkTransport>(card: &mut dyn Read<T>, cvc: Option<String>) {
-    match card.read(cvc) {
+async fn read<T: CkTransport>(card: &mut dyn Read<T>, cvc: Option<String>) {
+    match card.read(cvc).await {
         Ok(resp) => println!("{}", resp),
         Err(e) => {
             dbg!(&e);

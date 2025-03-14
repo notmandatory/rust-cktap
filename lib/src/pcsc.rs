@@ -4,7 +4,7 @@ use crate::Error;
 use crate::{CkTapCard, CkTransport};
 use pcsc::{Card, Context, Protocols, Scope, ShareMode, MAX_BUFFER_SIZE};
 
-pub fn find_first() -> Result<CkTapCard<Card>, Error> {
+pub async fn find_first() -> Result<CkTapCard<Card>, Error> {
     // Establish a PC/SC context.
     let ctx = Context::establish(Scope::User)?;
 
@@ -23,10 +23,11 @@ pub fn find_first() -> Result<CkTapCard<Card>, Error> {
 
     ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?
         .to_cktap()
+        .await
 }
 
 impl CkTransport for Card {
-    fn transmit_apdu(&self, apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
+    async fn transmit_apdu(&self, apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
         let mut receive_buffer = vec![0; MAX_BUFFER_SIZE];
         let rapdu = self.transmit(apdu.as_slice(), &mut receive_buffer)?;
         Ok(rapdu.to_vec())

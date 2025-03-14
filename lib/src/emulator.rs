@@ -8,14 +8,14 @@ use std::string::ToString;
 
 pub const CVC: &str = "123456";
 
-pub fn find_emulator() -> Result<CkTapCard<CardEmulator>, Error> {
+pub async fn find_emulator() -> Result<CkTapCard<CardEmulator>, Error> {
     let pipe_path = Path::new("/tmp/ecard-pipe");
     if !pipe_path.exists() {
         return Err(Error::Emulator("Emulator pipe doesn't exist.".to_string()));
     }
     let stream = UnixStream::connect("/tmp/ecard-pipe").expect("unix stream");
     let card_emulator = CardEmulator { stream };
-    card_emulator.to_cktap()
+    card_emulator.to_cktap().await
 }
 
 #[derive(Debug)]
@@ -24,7 +24,7 @@ pub struct CardEmulator {
 }
 
 impl CkTransport for CardEmulator {
-    fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
+    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
         // convert select_apdu into StatusCommand apdu bytes
         let select_apdu: Vec<u8> = AppletSelect::default().apdu_bytes();
         let command_apdu = if command_apdu.eq(&select_apdu) {
@@ -52,9 +52,9 @@ impl CkTransport for CardEmulator {
 pub mod test {
     use crate::emulator::find_emulator;
 
-    #[test]
-    pub fn test_transmit() {
-        let emulator = find_emulator().unwrap();
+    #[tokio::test]
+    pub async fn test_transmit() {
+        let emulator = find_emulator().await.unwrap();
         dbg!(emulator);
     }
 }

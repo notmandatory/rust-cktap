@@ -17,8 +17,9 @@ fn get_cvc() -> String {
 }
 
 // Example using pcsc crate
-fn main() -> Result<(), Error> {
-    let card = pcsc::find_first()?;
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let card = pcsc::find_first().await?;
     dbg!(&card);
 
     let rng = &mut rand::thread_rng();
@@ -30,25 +31,25 @@ fn main() -> Result<(), Error> {
             // if auth delay call wait
             while ts.auth_delay.is_some() {
                 dbg!(ts.auth_delay.unwrap());
-                ts.wait(None)?;
+                ts.wait(None).await?;
             }
 
             // only do this once per card!
             if ts.path.is_none() {
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = ts.init(chain_code, cvc)?;
+                let new_result = ts.init(chain_code, cvc.clone()).await?;
                 dbg!(new_result);
             }
 
-            // let read_result = card.read(cvc.clone())?;
+            // let read_result = ts.read(Some(cvc.clone())).await?;
             // dbg!(read_result);
 
-            dbg!(ts.check_certificate().unwrap().name());
+            dbg!(ts.check_certificate().await.unwrap().name());
 
             //let dump_result = card.dump();
 
             // let path = vec![2147483732, 2147483648, 2147483648];
-            // let derive_result = card.derive(path, cvc.clone())?;
+            // let derive_result = ts.derive(path, cvc.clone()).await?;
             // dbg!(&derive_result);
 
             // let nfc_result = card.nfc()?;
@@ -60,17 +61,17 @@ fn main() -> Result<(), Error> {
             // if auth delay call wait
             while chip.auth_delay.is_some() {
                 dbg!(chip.auth_delay.unwrap());
-                chip.wait(None)?;
+                chip.wait(None).await?;
             }
 
             // only do this once per card!
             if chip.path.is_none() {
                 let chain_code = rand_chaincode(rng).to_vec();
-                let new_result = chip.init(chain_code, get_cvc())?;
+                let new_result = chip.init(chain_code, get_cvc()).await?;
                 dbg!(new_result);
             }
 
-            // let read_result = card.read(cvc)?;
+            // let read_result = chip.read(Some(cvc.clone())).await?;
             // dbg!(read_result);
 
             // let nfc_result = card.nfc()?;
@@ -80,17 +81,17 @@ fn main() -> Result<(), Error> {
             // if auth delay call wait
             while sc.auth_delay.is_some() {
                 dbg!(sc.auth_delay.unwrap());
-                let wait_response = sc.wait(None)?;
+                let wait_response = sc.wait(None).await?;
                 dbg!(wait_response);
             }
 
-            // let read_result = sc.read(None)?;
+            // let read_result = sc.read(None).await?;
             // dbg!(read_result);
 
-            // let derive_result = card.derive()?;
+            // let derive_result = sc.derive().await?;
             // dbg!(&derive_result);
 
-            dbg!(sc.check_certificate().unwrap().name());
+            dbg!(sc.check_certificate().await.unwrap().name());
 
             // let nfc_result = card.nfc()?;
             // dbg!(nfc_result);
@@ -99,20 +100,20 @@ fn main() -> Result<(), Error> {
             //     if slot == &0 {
             //         // TODO must unseal first
             //         let chain_code = rand_chaincode(rng).to_vec();
-            //         let new_result = card.new_slot(0, chain_code, get_cvc())?;
+            //         let new_result = sc.new_slot(0, chain_code, get_cvc()).await?;
             //     }
             // }
 
             // let certs_result = card.certs()?;
             // dbg!(certs_result);
 
-            // let unseal_result = card.unseal(0, get_cvc())?;
+            // let unseal_result = sc.unseal(0, get_cvc()).await?;
             // dbg!(unseal_result);
 
-            // let dump_result = card.dump(0, None)?;
+            // let dump_result = sc.dump(0, None).await?;
             // dbg!(dump_result);
 
-            // let dump_result = card.dump(0, Some(get_cvc()))?;
+            // let dump_result = sc.dump(0, Some(get_cvc())).await?;
             // dbg!(dump_result);
         }
     }
