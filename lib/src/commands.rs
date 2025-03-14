@@ -49,10 +49,10 @@ pub trait Authentication<T: CkTransport> {
 }
 
 pub trait CkTransport: Sized {
-    fn transmit<'a, C, R>(&self, command: C) -> impl Future<Output = Result<R, Error>>
+    fn transmit<C, R>(&self, command: C) -> impl Future<Output = Result<R, Error>>
     where
         C: CommandApdu + serde::Serialize + Debug,
-        R: ResponseApdu + serde::Deserialize<'a> + Debug,
+        R: ResponseApdu + serde::de::DeserializeOwned + Debug,
     {
         async move {
             let command_apdu = command.apdu_bytes();
