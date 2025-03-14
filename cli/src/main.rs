@@ -130,7 +130,10 @@ async fn main() -> Result<(), Error> {
 
 // handler functions for each command
 
-async fn check_cert<T: CkTransport>(card: &mut dyn Certificate<T>) {
+async fn check_cert<C, T: CkTransport>(card: &mut C) 
+where 
+    C: Certificate<T>
+{
     if let Ok(k) = card.check_certificate().await {
         println!(
             "Genuine card from Coinkite.\nHas cert signed by: {}",
@@ -141,7 +144,10 @@ async fn check_cert<T: CkTransport>(card: &mut dyn Certificate<T>) {
     }
 }
 
-async fn read<T: CkTransport>(card: &mut dyn Read<T>, cvc: Option<String>) {
+async fn read<C, T: CkTransport>(card: &mut C, cvc: Option<String>) 
+where 
+    C: Read<T>
+{
     match card.read(cvc).await {
         Ok(resp) => println!("{}", resp),
         Err(e) => {
