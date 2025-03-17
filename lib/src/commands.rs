@@ -43,6 +43,7 @@ pub trait Authentication<T: CkTransport> {
             .map(|(x, y)| x ^ y)
             .take(cvc_bytes.len())
             .collect();
+
         let xcvc = cvc_bytes.iter().zip(mask).map(|(x, y)| x ^ y).collect();
         (eprivkey, epubkey, xcvc)
     }
