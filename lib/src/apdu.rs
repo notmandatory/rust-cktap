@@ -75,7 +75,7 @@ pub struct ErrorResponse {
 
 // Apdu Traits
 pub trait CommandApdu {
-    fn name() -> String;
+    fn name() -> &'static str;
     fn apdu_bytes(&self) -> Vec<u8>
     where
         Self: serde::Serialize + Debug,
@@ -115,9 +115,10 @@ fn build_apdu(header: &[u8], command: &[u8]) -> Vec<u8> {
 pub struct AppletSelect {}
 
 impl CommandApdu for AppletSelect {
-    fn name() -> String {
-        String::default()
+    fn name() -> &'static str {
+        ""
     }
+
     fn apdu_bytes(&self) -> Vec<u8> {
         build_apdu(&SELECT_CLA_INS_P1P2, &APP_ID)
     }
@@ -127,7 +128,7 @@ impl CommandApdu for AppletSelect {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct StatusCommand {
     /// 'status' command
-    cmd: String,
+    cmd: &'static str,
 }
 
 impl Default for StatusCommand {
@@ -137,8 +138,8 @@ impl Default for StatusCommand {
 }
 
 impl CommandApdu for StatusCommand {
-    fn name() -> String {
-        "status".to_string()
+    fn name() -> &'static str {
+        "status"
     }
 }
 
@@ -171,7 +172,7 @@ impl ResponseApdu for StatusResponse {}
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct ReadCommand {
     /// 'read' command
-    cmd: String,
+    cmd: &'static str,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
@@ -204,8 +205,8 @@ impl ReadCommand {
 }
 
 impl CommandApdu for ReadCommand {
-    fn name() -> String {
-        "read".to_string()
+    fn name() -> &'static str {
+        "read"
     }
 }
 
@@ -280,7 +281,7 @@ impl Debug for ReadResponse {
 // Checks payment address derivation: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#satscard-checks-payment-address-derivation
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DeriveCommand {
-    cmd: String,
+    cmd: &'static str,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
@@ -294,8 +295,8 @@ pub struct DeriveCommand {
 }
 
 impl CommandApdu for DeriveCommand {
-    fn name() -> String {
-        "derive".to_string()
+    fn name() -> &'static str {
+        "derive"
     }
 }
 
@@ -369,12 +370,12 @@ impl Debug for DeriveResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct CertsCommand {
     /// 'certs' command
-    cmd: String,
+    cmd: &'static str,
 }
 
 impl CommandApdu for CertsCommand {
-    fn name() -> String {
-        "certs".to_string()
+    fn name() -> &'static str {
+        "certs"
     }
 }
 
@@ -430,15 +431,15 @@ impl Debug for CertsResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct CheckCommand {
     /// 'check' command
-    cmd: String,
+    cmd: &'static str,
     /// random value from app, 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
 }
 
 impl CommandApdu for CheckCommand {
-    fn name() -> String {
-        "check".to_string()
+    fn name() -> &'static str {
+        "check"
     }
 }
 
@@ -477,7 +478,7 @@ impl Debug for CheckResponse {
 /// nfc command to return dynamic url for NFC-enabled smart phone
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcCommand {
-    cmd: String,
+    cmd: &'static str,
 }
 
 impl Default for NfcCommand {
@@ -487,8 +488,8 @@ impl Default for NfcCommand {
 }
 
 impl CommandApdu for NfcCommand {
-    fn name() -> String {
-        "nfc".to_string()
+    fn name() -> &'static str {
+        "nfc"
     }
 }
 
@@ -514,7 +515,7 @@ impl ResponseApdu for NfcResponse {}
 // }
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignCommand {
-    cmd: String,
+    cmd: &'static str,
     slot: Option<u8>,
     subpath: Option<[u32; 2]>,
     // additional keypath for TapSigner only
@@ -545,10 +546,8 @@ impl SignCommand {
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
-        let cmd = Self::name();
-
         SignCommand {
-            cmd,
+            cmd: Self::name(),
             slot: Some(0),
             subpath,
             digest,
@@ -559,8 +558,8 @@ impl SignCommand {
 }
 
 impl CommandApdu for SignCommand {
-    fn name() -> String {
-        "sign".to_string()
+    fn name() -> &'static str {
+        "sign"
     }
 }
 
@@ -606,7 +605,7 @@ impl Debug for SignResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct WaitCommand {
     /// 'wait' command
-    cmd: String,
+    cmd: &'static str,
     /// app's ephemeral public key (optional)
     #[serde(with = "serde_bytes")]
     epubkey: Option<Vec<u8>>,
@@ -626,8 +625,8 @@ impl WaitCommand {
 }
 
 impl CommandApdu for WaitCommand {
-    fn name() -> String {
-        "wait".to_string()
+    fn name() -> &'static str {
+        "wait"
     }
 }
 
@@ -655,7 +654,7 @@ impl ResponseApdu for WaitResponse {}
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct NewCommand {
     /// 'new' command
-    cmd: String,
+    cmd: &'static str,
     /// (use 0 for TapSigner) slot to be affected, must equal currently-active slot number
     slot: u8,
     /// app's entropy share to be applied to new slot (optional on SATSCARD)
@@ -688,8 +687,8 @@ impl NewCommand {
 }
 
 impl CommandApdu for NewCommand {
-    fn name() -> String {
-        "new".to_string()
+    fn name() -> &'static str {
+        "new"
     }
 }
 
@@ -729,7 +728,7 @@ impl fmt::Display for NewResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct UnsealCommand {
     /// 'unseal' command
-    cmd: String,
+    cmd: &'static str,
     /// slot to be unsealed, must equal currently-active slot number
     slot: u8,
     /// app's ephemeral public key, 33 bytes
@@ -752,8 +751,8 @@ impl UnsealCommand {
 }
 
 impl CommandApdu for UnsealCommand {
-    fn name() -> String {
-        "unseal".to_string()
+    fn name() -> &'static str {
+        "unseal"
     }
 }
 
@@ -808,7 +807,7 @@ impl fmt::Display for UnsealResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DumpCommand {
     /// 'dump' command
-    cmd: String,
+    cmd: &'static str,
     /// which slot to dump, must be unsealed.
     slot: usize,
     /// app's ephemeral public key (optional), 33 bytes
@@ -833,8 +832,8 @@ impl DumpCommand {
 }
 
 impl CommandApdu for DumpCommand {
-    fn name() -> String {
-        "dump".to_string()
+    fn name() -> &'static str {
+        "dump"
     }
 }
 

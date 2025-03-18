@@ -23,7 +23,7 @@ pub trait Authentication<T: CkTransport> {
 
     fn transport(&self) -> &T;
 
-    fn calc_ekeys_xcvc(&self, cvc: String, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
+    fn calc_ekeys_xcvc(&self, cvc: &str, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
         let secp = Self::secp(self);
         let pubkey = Self::pubkey(self);
         let nonce = Self::card_nonce(self);
@@ -104,7 +104,7 @@ where
 
             let (cmd, session_key) = if self.requires_auth() {
                 let (eprivkey, epubkey, xcvc) =
-                    self.calc_ekeys_xcvc(cvc.unwrap(), &ReadCommand::name());
+                    self.calc_ekeys_xcvc(cvc.as_ref().unwrap(), &ReadCommand::name());
                 (
                     ReadCommand::authenticated(app_nonce.clone(), epubkey, xcvc),
                     Some(SharedSecret::new(self.pubkey(), &eprivkey)),
@@ -149,7 +149,7 @@ where
     fn wait(&mut self, cvc: Option<String>) -> impl Future<Output = Result<WaitResponse, Error>> {
         async move {
             let epubkey_xcvc = cvc.map(|cvc| {
-                let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &WaitCommand::name());
+                let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, &WaitCommand::name());
                 (epubkey, xcvc)
             });
 

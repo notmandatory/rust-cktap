@@ -75,7 +75,7 @@ impl<T: CkTransport> TapSigner<T> {
     }
 
     pub async fn init(&mut self, chain_code: Vec<u8>, cvc: String) -> Result<NewResponse, Error> {
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &NewCommand::name());
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, NewCommand::name());
         let epubkey = epubkey.serialize().to_vec();
         let new_command = NewCommand::new(Some(0), Some(chain_code), epubkey, xcvc);
         let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command).await;
@@ -89,7 +89,7 @@ impl<T: CkTransport> TapSigner<T> {
         // set most significant bit to 1 to represent hardened path steps
         let path = path.iter().map(|p| p ^ (1 << 31)).collect();
         let app_nonce = crate::rand_nonce();
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &DeriveCommand::name());
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DeriveCommand::name());
         let cmd = DeriveCommand::for_tapsigner(app_nonce.clone(), path, epubkey, xcvc);
         let derive_response: Result<DeriveResponse, Error> = self.transport.transmit(cmd).await;
         if let Ok(response) = &derive_response {
@@ -114,7 +114,7 @@ impl<T: CkTransport> TapSigner<T> {
     }
 
     pub async fn change(&mut self, new_cvc: &str, cvc: &str) -> Result<(), Error> {
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
+        let (_, _epubkey, _xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
         todo!()
     }
 }
