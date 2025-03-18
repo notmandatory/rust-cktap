@@ -5,7 +5,8 @@ use secp256k1::{
 };
 
 use crate::apdu::{
-    CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand, NewResponse, StatusResponse,
+    tap_signer::ChangeCommand, CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand,
+    NewResponse, StatusResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
 
@@ -110,6 +111,11 @@ impl<T: CkTransport> TapSigner<T> {
             self.set_card_nonce(response.card_nonce.clone());
         }
         derive_response
+    }
+
+    pub async fn change(&mut self, new_cvc: &str, cvc: &str) -> Result<(), Error> {
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
+        todo!()
     }
 }
 

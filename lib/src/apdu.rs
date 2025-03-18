@@ -1,3 +1,5 @@
+pub mod tap_signer;
+
 /// An Application Protocol Data Unit (APDU) is the unit of communication between a smart card
 /// reader and a smart card. This file defines the Coinkite APDU and set of command/responses.
 use ciborium::de::from_reader;
@@ -878,50 +880,3 @@ pub struct DumpResponse {
 }
 
 impl ResponseApdu for DumpResponse {}
-
-/// TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct XpubCommand {
-    cmd: String,  // always "xpub"
-    master: bool, // give master (`m`) XPUB, otherwise derived XPUB
-    #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>, // app's ephemeral public key (required)
-    #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>, //encrypted CVC value (required)
-}
-
-impl CommandApdu for XpubCommand {
-    fn name() -> String {
-        "xpub".to_string()
-    }
-}
-
-impl XpubCommand {
-    pub fn new(master: bool, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
-        Self {
-            cmd: Self::name(),
-            master,
-            epubkey: epubkey.serialize().to_vec(),
-            xcvc,
-        }
-    }
-}
-
-#[derive(Deserialize, Clone)]
-pub struct XpubResponse {
-    #[serde(with = "serde_bytes")]
-    pub xpub: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-}
-
-impl ResponseApdu for XpubResponse {}
-
-impl Debug for XpubResponse {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.debug_struct("XpubResponse")
-            .field("xpub", &self.xpub.to_lower_hex_string())
-            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
-            .finish()
-    }
-}
