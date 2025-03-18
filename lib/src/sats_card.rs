@@ -19,7 +19,7 @@ pub struct SatsCard<T: CkTransport> {
     pub slots: (u8, u8),
     pub addr: Option<String>,
     pub pubkey: PublicKey,
-    pub card_nonce: Vec<u8>, // 16 bytes
+    pub card_nonce: [u8; 16],
     pub auth_delay: Option<usize>,
 }
 
@@ -32,11 +32,11 @@ impl<T: CkTransport> Authentication<T> for SatsCard<T> {
         &self.pubkey
     }
 
-    fn card_nonce(&self) -> &Vec<u8> {
+    fn card_nonce(&self) -> &[u8; 16] {
         &self.card_nonce
     }
 
-    fn set_card_nonce(&mut self, new_nonce: Vec<u8>) {
+    fn set_card_nonce(&mut self, new_nonce: [u8; 16]) {
         self.card_nonce = new_nonce;
     }
 
@@ -86,7 +86,7 @@ impl<T: CkTransport> SatsCard<T> {
         let new_command = NewCommand::new(Some(slot), chain_code, epubkey, xcvc);
         let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command).await;
         if let Ok(response) = &new_response {
-            self.card_nonce = response.card_nonce.clone();
+            self.card_nonce = response.card_nonce;
             self.slots.0 = response.slot;
         }
         new_response
@@ -94,13 +94,13 @@ impl<T: CkTransport> SatsCard<T> {
 
     pub async fn derive(&mut self) -> Result<DeriveResponse, Error> {
         let nonce = crate::rand_nonce();
-        let card_nonce = self.card_nonce().clone();
+        let card_nonce = *self.card_nonce();
 
-        let cmd = DeriveCommand::for_satscard(nonce.clone());
+        let cmd = DeriveCommand::for_satscard(nonce);
         let resp: Result<DeriveResponse, Error> = self.transport().transmit(cmd).await;
 
         if let Ok(r) = &resp {
-            self.set_card_nonce(r.card_nonce.clone());
+            self.set_card_nonce(r.card_nonce);
 
             // Verify signature
             let mut message_bytes: Vec<u8> = Vec::new();
@@ -125,7 +125,7 @@ impl<T: CkTransport> SatsCard<T> {
         let unseal_response: Result<UnsealResponse, Error> =
             self.transport.transmit(unseal_command).await;
         if let Ok(response) = &unseal_response {
-            self.set_card_nonce(response.card_nonce.clone())
+            self.set_card_nonce(response.card_nonce)
         }
         unseal_response
     }
@@ -168,7 +168,11 @@ impl<T: CkTransport> Read<T> for SatsCard<T> {
 }
 
 impl<T: CkTransport> Certificate<T> for SatsCard<T> {
-    fn message_digest(&mut self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message {
+    fn message_digest(
+        &mut self,
+        card_nonce: [u8; 16],
+        app_nonce: [u8; 16],
+    ) -> Message {
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);

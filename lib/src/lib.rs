@@ -1,4 +1,4 @@
-uniffi::include_scaffolding!("rust-cktap");
+uniffi::setup_scaffolding!();
 
 extern crate core;
 pub extern crate secp256k1;
@@ -11,6 +11,7 @@ pub mod factory_root_key;
 
 #[cfg(feature = "emulator")]
 pub mod emulator;
+mod ffi;
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
 pub mod sats_card;
@@ -52,11 +53,11 @@ pub fn rand_chaincode(rng: &mut ThreadRng) -> [u8; 32] {
     chain_code
 }
 
-pub fn rand_nonce() -> Vec<u8> {
+pub fn rand_nonce() -> [u8; 16] {
     let rng = &mut rand::thread_rng();
     let mut nonce = [0u8; 16];
     rng.fill(&mut nonce);
-    nonce.to_vec()
+    nonce
 }
 
 // Errors

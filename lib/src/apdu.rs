@@ -18,10 +18,6 @@ pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
 
-// require nonce sizes (bytes)
-pub const CARD_NONCE_SIZE: usize = 16;
-pub const USER_NONCE_SIZE: usize = 16;
-
 // Errors
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
@@ -162,7 +158,7 @@ pub struct StatusResponse {
     #[serde(with = "serde_bytes")]
     pub pubkey: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
     pub testnet: Option<bool>,
     #[serde(default)]
     pub auth_delay: Option<usize>,
@@ -180,7 +176,7 @@ pub struct ReadCommand {
     cmd: &'static str,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
+    nonce: [u8; 16],
     /// (TAPSIGNER only) auth is required, 33 bytes
     #[serde(with = "serde_bytes")]
     epubkey: Option<[u8; 33]>,
@@ -190,7 +186,7 @@ pub struct ReadCommand {
 }
 
 impl ReadCommand {
-    pub fn authenticated(nonce: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn authenticated(nonce: [u8; 16], epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
         ReadCommand {
             cmd: Self::name(),
             nonce,
@@ -199,7 +195,7 @@ impl ReadCommand {
         }
     }
 
-    pub fn unauthenticated(nonce: Vec<u8>) -> Self {
+    pub fn unauthenticated(nonce: [u8; 16]) -> Self {
         ReadCommand {
             cmd: Self::name(),
             nonce,
@@ -233,7 +229,7 @@ pub struct ReadResponse {
     pub pubkey: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for ReadResponse {}
@@ -289,7 +285,7 @@ pub struct DeriveCommand {
     cmd: &'static str,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
+    nonce: [u8; 16],
     path: Vec<u32>, // tapsigner: empty list for `m` case (a no-op)
     /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
@@ -306,7 +302,7 @@ impl CommandApdu for DeriveCommand {
 }
 
 impl DeriveCommand {
-    pub fn for_satscard(nonce: Vec<u8>) -> Self {
+    pub fn for_satscard(nonce: [u8; 16]) -> Self {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
@@ -317,7 +313,7 @@ impl DeriveCommand {
     }
 
     pub fn for_tapsigner(
-        nonce: Vec<u8>,
+        nonce: [u8; 16],
         path: Vec<u32>,
         epubkey: PublicKey,
         xcvc: Vec<u8>,
@@ -348,7 +344,7 @@ pub struct DeriveResponse {
     pub pubkey: Option<Vec<u8>>, // 33 bytes
     /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>, // 16 bytes
+    pub card_nonce: [u8; 16], // 16 bytes
 }
 
 impl ResponseApdu for DeriveResponse {}
@@ -439,7 +435,7 @@ pub struct CheckCommand {
     cmd: &'static str,
     /// random value from app, 16 bytes
     #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
+    nonce: [u8; 16],
 }
 
 impl CommandApdu for CheckCommand {
@@ -449,7 +445,7 @@ impl CommandApdu for CheckCommand {
 }
 
 impl CheckCommand {
-    pub fn new(nonce: Vec<u8>) -> Self {
+    pub fn new(nonce: [u8; 16]) -> Self {
         CheckCommand {
             cmd: Self::name(),
             nonce,
@@ -466,7 +462,7 @@ pub struct CheckResponse {
     pub auth_sig: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for CheckResponse {}
@@ -581,7 +577,7 @@ pub struct SignResponse {
     #[serde(with = "serde_bytes")]
     pub pubkey: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for SignResponse {}
@@ -715,7 +711,7 @@ pub struct NewResponse {
     pub slot: u8,
     /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>, // 16 bytes
+    pub card_nonce: [u8; 16], // 16 bytes
 }
 
 impl ResponseApdu for NewResponse {}
@@ -781,7 +777,7 @@ pub struct UnsealResponse {
     pub chain_code: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for UnsealResponse {}
@@ -880,7 +876,7 @@ pub struct DumpResponse {
     pub addr: Option<String>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for DumpResponse {}

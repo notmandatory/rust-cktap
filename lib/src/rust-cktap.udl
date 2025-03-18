@@ -1,3 +1,0 @@
-namespace rust_cktap {
-    sequence<u8> rand_nonce();
-};

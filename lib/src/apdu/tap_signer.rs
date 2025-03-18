@@ -39,7 +39,7 @@ pub struct XpubResponse {
     #[serde(with = "serde_bytes")]
     pub xpub: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for XpubResponse {}
