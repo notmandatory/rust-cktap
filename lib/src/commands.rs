@@ -175,11 +175,7 @@ pub trait Certificate<T>: Authentication<T>
 where
     T: CkTransport,
 {
-    fn message_digest(
-        &mut self,
-        card_nonce: [u8; 16],
-        app_nonce: [u8; 16],
-    ) -> Message;
+    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message;
 
     fn check_certificate(&mut self) -> impl Future<Output = Result<FactoryRootKey, Error>> {
         async {

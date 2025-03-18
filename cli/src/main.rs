@@ -128,12 +128,12 @@ async fn main() -> Result<(), Error> {
 
                 TapSignerCommand::Backup => {
                     let response = &ts.backup(&cvc()).await;
-                    dbg!(response);
+                    println!("{:?}", response);
                 }
 
                 TapSignerCommand::Change { new_cvc } => {
                     let response = &ts.change(&new_cvc, &cvc()).await;
-                    dbg!(response);
+                    println!("{:?}", response);
                 }
             }
         }

@@ -157,9 +157,21 @@ impl<T: CkTransport> TapSigner<T> {
             return Err(TapSignerError::NewCvcSameAsOld);
         }
 
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
+        // Create session key and encrypt current CVC
+        let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
 
-        let change_command = ChangeCommand::new(new_cvc.as_bytes().to_vec(), epubkey, xcvc);
+        // Use the same session key to encrypt the new CVC
+        let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+
+        // encrypt the new cvc by XORing with the session key
+        let xnew_cvc: Vec<u8> = session_key
+            .as_ref()
+            .iter()
+            .zip(new_cvc.as_bytes().iter())
+            .map(|(session_key_byte, cvc_byte)| session_key_byte ^ cvc_byte)
+            .collect();
+
+        let change_command = ChangeCommand::new(xnew_cvc, epubkey, xcvc);
         let change_response: ChangeResponse = self.transport.transmit(change_command).await?;
 
         self.card_nonce = change_response.card_nonce;
