@@ -12,7 +12,7 @@ pub struct XpubCommand {
     cmd: &'static str, // always "xpub"
     master: bool,      // give master (`m`) XPUB, otherwise derived XPUB
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>, // app's ephemeral public key (required)
+    epubkey: [u8; 33], // app's ephemeral public key (required)
     #[serde(with = "serde_bytes")]
     xcvc: Vec<u8>, //encrypted CVC value (required)
 }
@@ -28,7 +28,7 @@ impl XpubCommand {
         Self {
             cmd: Self::name(),
             master,
-            epubkey: epubkey.serialize().to_vec(),
+            epubkey: epubkey.serialize(),
             xcvc,
         }
     }
@@ -68,13 +68,24 @@ pub struct ChangeCommand {
     #[serde(with = "serde_bytes")]
     epubkey: [u8; 33],
 
-    //encrypted CVC value (required)
+    //encrypted CVC value (required) (6-32 bytes)
     #[serde(with = "serde_bytes")]
-    xcvc: [u8; 6],
+    xcvc: Vec<u8>,
 }
 
 impl CommandApdu for ChangeCommand {
     fn name() -> &'static str {
         "change"
+    }
+}
+
+impl ChangeCommand {
+    pub fn new(data: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+        Self {
+            cmd: Self::name(),
+            data,
+            epubkey: epubkey.serialize(),
+            xcvc,
+        }
     }
 }

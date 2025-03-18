@@ -104,7 +104,7 @@ where
 
             let (cmd, session_key) = if self.requires_auth() {
                 let (eprivkey, epubkey, xcvc) =
-                    self.calc_ekeys_xcvc(cvc.as_ref().unwrap(), &ReadCommand::name());
+                    self.calc_ekeys_xcvc(cvc.as_ref().unwrap(), ReadCommand::name());
                 (
                     ReadCommand::authenticated(app_nonce.clone(), epubkey, xcvc),
                     Some(SharedSecret::new(self.pubkey(), &eprivkey)),
@@ -149,12 +149,12 @@ where
     fn wait(&mut self, cvc: Option<String>) -> impl Future<Output = Result<WaitResponse, Error>> {
         async move {
             let epubkey_xcvc = cvc.map(|cvc| {
-                let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, &WaitCommand::name());
+                let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, WaitCommand::name());
                 (epubkey, xcvc)
             });
 
             let (epubkey, xcvc) = epubkey_xcvc
-                .map(|(epubkey, xcvc)| (Some(epubkey.serialize().to_vec()), Some(xcvc)))
+                .map(|(epubkey, xcvc)| (Some(epubkey.serialize()), Some(xcvc)))
                 .unwrap_or((None, None));
 
             let wait_command = WaitCommand::new(epubkey, xcvc);

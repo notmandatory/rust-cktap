@@ -178,8 +178,8 @@ pub struct ReadCommand {
     nonce: Vec<u8>,
     /// (TAPSIGNER only) auth is required, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Option<Vec<u8>>,
-    /// (TAPSIGNER only) auth is required encrypted CVC value, 6 to 32 bytes
+    epubkey: Option<[u8; 33]>,
+    /// (TAPSIGNER only) auth is required encrypted CVC value, 16 to 32 bytes
     #[serde(with = "serde_bytes")]
     xcvc: Option<Vec<u8>>,
 }
@@ -189,7 +189,7 @@ impl ReadCommand {
         ReadCommand {
             cmd: Self::name(),
             nonce,
-            epubkey: Some(epubkey.serialize().to_vec()),
+            epubkey: Some(epubkey.serialize()),
             xcvc: Some(xcvc),
         }
     }
@@ -286,9 +286,9 @@ pub struct DeriveCommand {
     #[serde(with = "serde_bytes")]
     nonce: Vec<u8>,
     path: Vec<u32>, // tapsigner: empty list for `m` case (a no-op)
-    /// app's ephemeral public key
+    /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Option<Vec<u8>>,
+    epubkey: Option<[u8; 33]>,
     /// encrypted CVC value
     #[serde(with = "serde_bytes")]
     xcvc: Option<Vec<u8>>,
@@ -321,7 +321,7 @@ impl DeriveCommand {
             cmd: Self::name(),
             nonce,
             path,
-            epubkey: Some(epubkey.serialize().to_vec()),
+            epubkey: Some(epubkey.serialize()),
             xcvc: Some(xcvc),
         }
     }
@@ -523,7 +523,7 @@ pub struct SignCommand {
     digest: Vec<u8>,
     // message digest to be signed
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>,
+    epubkey: [u8; 33],
     #[serde(with = "serde_bytes")]
     xcvc: Vec<u8>,
 }
@@ -551,7 +551,7 @@ impl SignCommand {
             slot: Some(0),
             subpath,
             digest,
-            epubkey: epubkey.serialize().to_vec(),
+            epubkey: epubkey.serialize(),
             xcvc,
         }
     }
@@ -606,16 +606,16 @@ impl Debug for SignResponse {
 pub struct WaitCommand {
     /// 'wait' command
     cmd: &'static str,
-    /// app's ephemeral public key (optional)
+    /// app's ephemeral public key (optional), 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Option<Vec<u8>>,
-    /// encrypted CVC value (optional), 6 to 32 bytes
+    epubkey: Option<[u8; 33]>,
+    /// encrypted CVC value (optional), 16 to 32 bytes
     #[serde(with = "serde_bytes")]
     xcvc: Option<Vec<u8>>,
 }
 
 impl WaitCommand {
-    pub fn new(epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(epubkey: Option<[u8; 33]>, xcvc: Option<Vec<u8>>) -> Self {
         WaitCommand {
             cmd: Self::name(),
             epubkey,
@@ -660,19 +660,19 @@ pub struct NewCommand {
     /// app's entropy share to be applied to new slot (optional on SATSCARD)
     #[serde(with = "serde_bytes")]
     chain_code: Option<Vec<u8>>, // 32 bytes
-    /// app's ephemeral public key
+    /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>, // 33 bytes
+    epubkey: [u8; 33],
     /// encrypted CVC value
     #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>, // 6 bytes
+    xcvc: Vec<u8>, // 6-32 bytes
 }
 
 impl NewCommand {
     pub fn new(
         slot: Option<u8>,
         chain_code: Option<Vec<u8>>,
-        epubkey: Vec<u8>,
+        epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         let slot = slot.unwrap_or_default();
@@ -680,7 +680,7 @@ impl NewCommand {
             cmd: Self::name(),
             slot,
             chain_code,
-            epubkey,
+            epubkey: epubkey.serialize(),
             xcvc,
         }
     }
@@ -733,18 +733,18 @@ pub struct UnsealCommand {
     slot: u8,
     /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>,
-    /// encrypted CVC value, 6 bytes
+    epubkey: [u8; 33],
+    /// encrypted CVC value, 6-32 bytes
     #[serde(with = "serde_bytes")]
     xcvc: Vec<u8>,
 }
 
 impl UnsealCommand {
-    pub fn new(slot: u8, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
+    pub fn new(slot: u8, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
         UnsealCommand {
             cmd: Self::name(),
             slot,
-            epubkey,
+            epubkey: epubkey.serialize(),
             xcvc,
         }
     }
@@ -813,7 +813,7 @@ pub struct DumpCommand {
     /// app's ephemeral public key (optional), 33 bytes
     #[serde(with = "serde_bytes")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    epubkey: Option<Vec<u8>>,
+    epubkey: Option<[u8; 33]>,
     /// encrypted CVC value (optional), 6 bytes
     #[serde(with = "serde_bytes")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -821,11 +821,11 @@ pub struct DumpCommand {
 }
 
 impl DumpCommand {
-    pub fn new(slot: usize, epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(slot: usize, epubkey: Option<PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
         DumpCommand {
             cmd: Self::name(),
             slot,
-            epubkey,
+            epubkey: epubkey.map(|pk| pk.serialize()),
             xcvc,
         }
     }

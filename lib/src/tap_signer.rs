@@ -76,9 +76,10 @@ impl<T: CkTransport> TapSigner<T> {
 
     pub async fn init(&mut self, chain_code: Vec<u8>, cvc: String) -> Result<NewResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, NewCommand::name());
-        let epubkey = epubkey.serialize().to_vec();
+
         let new_command = NewCommand::new(Some(0), Some(chain_code), epubkey, xcvc);
         let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command).await;
+
         if let Ok(response) = &new_response {
             self.card_nonce = response.card_nonce.clone();
         }
@@ -114,7 +115,12 @@ impl<T: CkTransport> TapSigner<T> {
     }
 
     pub async fn change(&mut self, new_cvc: &str, cvc: &str) -> Result<(), Error> {
-        let (_, _epubkey, _xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
+
+        let change_command = ChangeCommand::new(new_cvc.as_bytes().to_vec(), epubkey, xcvc);
+        let change_response: Result<NewResponse, Error> =
+            self.transport.transmit(change_command).await;
+
         todo!()
     }
 }
