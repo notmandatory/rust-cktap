@@ -5,8 +5,9 @@ use secp256k1::{
 };
 
 use crate::apdu::{
-    tap_signer::ChangeCommand, CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand,
-    NewResponse, StatusResponse,
+    tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
+    CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand, NewResponse,
+    StatusResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
 
@@ -28,6 +29,15 @@ pub struct TapSigner<T: CkTransport> {
 pub enum TapSignerError {
     #[error(transparent)]
     ApduError(#[from] Error),
+
+    #[error("new cvc is too short, must be at least 6 bytes, was only {0} bytes")]
+    NewCvcTooShort(usize),
+
+    #[error("new cvc is too long, must be at most 32 bytes, was {0} bytes")]
+    NewCvcTooLong(usize),
+
+    #[error("new cvc is the same as the old one")]
+    NewCvcSameAsOld,
 }
 
 impl<T: CkTransport> Authentication<T> for TapSigner<T> {
@@ -80,54 +90,90 @@ impl<T: CkTransport> TapSigner<T> {
         }
     }
 
-    pub async fn init(&mut self, chain_code: Vec<u8>, cvc: String) -> Result<NewResponse, Error> {
+    pub async fn init(
+        &mut self,
+        chain_code: Vec<u8>,
+        cvc: String,
+    ) -> Result<NewResponse, TapSignerError> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, NewCommand::name());
 
         let new_command = NewCommand::new(Some(0), Some(chain_code), epubkey, xcvc);
-        let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command).await;
+        let new_response: NewResponse = self.transport.transmit(new_command).await?;
 
-        if let Ok(response) = &new_response {
-            self.card_nonce = response.card_nonce;
-        }
-        new_response
+        self.card_nonce = new_response.card_nonce;
+        Ok(new_response)
     }
 
-    pub async fn derive(&mut self, path: Vec<u32>, cvc: String) -> Result<DeriveResponse, Error> {
+    pub async fn derive(
+        &mut self,
+        path: Vec<u32>,
+        cvc: String,
+    ) -> Result<DeriveResponse, TapSignerError> {
         // set most significant bit to 1 to represent hardened path steps
         let path = path.iter().map(|p| p ^ (1 << 31)).collect();
         let app_nonce = crate::rand_nonce();
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DeriveCommand::name());
         let cmd = DeriveCommand::for_tapsigner(app_nonce, path, epubkey, xcvc);
-        let derive_response: Result<DeriveResponse, Error> = self.transport.transmit(cmd).await;
-        if let Ok(response) = &derive_response {
-            let card_nonce = self.card_nonce();
-            let sig = &response.sig;
-            let mut message_bytes: Vec<u8> = Vec::new();
-            message_bytes.extend("OPENDIME".as_bytes());
-            message_bytes.extend(card_nonce);
-            message_bytes.extend(app_nonce);
-            message_bytes.extend(&response.chain_code);
+        let derive_response: DeriveResponse = self.transport.transmit(cmd).await?;
 
-            let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
-            let message = Message::from_digest(message_bytes_hash.to_byte_array());
+        let card_nonce = self.card_nonce();
+        let sig = &derive_response.sig;
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend("OPENDIME".as_bytes());
+        message_bytes.extend(card_nonce);
+        message_bytes.extend(app_nonce);
+        message_bytes.extend(&derive_response.chain_code);
 
-            let signature = Signature::from_compact(sig.as_slice())?;
-            let pubkey = PublicKey::from_slice(response.master_pubkey.as_slice())?;
-            // TODO fix verify when a derivation path is used, currently only works if no path given
-            self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
-            self.set_card_nonce(response.card_nonce);
-        }
-        derive_response
+        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+        let message = Message::from_digest(message_bytes_hash.to_byte_array());
+
+        let signature = Signature::from_compact(sig.as_slice()).map_err(Error::from)?;
+        let pubkey =
+            PublicKey::from_slice(derive_response.master_pubkey.as_slice()).map_err(Error::from)?;
+
+        // TODO fix verify when a derivation path is used, currently only works if no path given
+        self.secp()
+            .verify_ecdsa(&message, &signature, &pubkey)
+            .map_err(Error::from)?;
+
+        self.card_nonce = derive_response.card_nonce;
+        Ok(derive_response)
     }
 
-    pub async fn change(&mut self, new_cvc: &str, cvc: &str) -> Result<(), Error> {
+    pub async fn change(
+        &mut self,
+        new_cvc: &str,
+        cvc: &str,
+    ) -> Result<ChangeResponse, TapSignerError> {
+        if new_cvc.len() < 6 {
+            return Err(TapSignerError::NewCvcTooShort(new_cvc.len()));
+        }
+
+        if new_cvc.len() > 32 {
+            return Err(TapSignerError::NewCvcTooLong(new_cvc.len()));
+        }
+
+        if new_cvc == cvc {
+            return Err(TapSignerError::NewCvcSameAsOld);
+        }
+
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
 
         let change_command = ChangeCommand::new(new_cvc.as_bytes().to_vec(), epubkey, xcvc);
-        let change_response: Result<NewResponse, Error> =
-            self.transport.transmit(change_command).await;
+        let change_response: ChangeResponse = self.transport.transmit(change_command).await?;
 
-        todo!()
+        self.card_nonce = change_response.card_nonce;
+        Ok(change_response)
+    }
+
+    pub async fn backup(&mut self, cvc: &str) -> Result<BackupResponse, TapSignerError> {
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, "backup");
+
+        let backup_command = BackupCommand::new(epubkey, xcvc);
+        let backup_response: BackupResponse = self.transport.transmit(backup_command).await?;
+
+        self.card_nonce = backup_response.card_nonce;
+        Ok(backup_response)
     }
 }
 
@@ -144,11 +190,7 @@ impl<T: CkTransport> Read<T> for TapSigner<T> {
 }
 
 impl<T: CkTransport> Certificate<T> for TapSigner<T> {
-    fn message_digest(
-        &mut self,
-        card_nonce: [u8; 16],
-        app_nonce: [u8; 16],
-    ) -> Message {
+    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message {
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);

@@ -89,3 +89,55 @@ impl ChangeCommand {
         }
     }
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ChangeResponse {
+    pub success: bool,
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: [u8; 16],
+}
+
+impl ResponseApdu for ChangeResponse {}
+
+// MARK: - BackupCommand
+/// TAPSIGNER only - Get an encrypted backup of the card's private key
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct BackupCommand {
+    // always "backup"
+    cmd: &'static str,
+
+    // app's ephemeral public key (required)
+    #[serde(with = "serde_bytes")]
+    epubkey: [u8; 33],
+
+    //encrypted CVC value (required)
+    #[serde(with = "serde_bytes")]
+    xcvc: Vec<u8>,
+}
+
+impl CommandApdu for BackupCommand {
+    fn name() -> &'static str {
+        "backup"
+    }
+}
+
+impl BackupCommand {
+    pub fn new(epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+        Self {
+            cmd: Self::name(),
+            epubkey: epubkey.serialize(),
+            xcvc,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BackupResponse {
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: [u8; 16],
+}
+
+impl ResponseApdu for BackupResponse {}
