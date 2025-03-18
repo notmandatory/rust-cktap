@@ -24,6 +24,12 @@ pub struct TapSigner<T: CkTransport> {
     pub auth_delay: Option<usize>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum TapSignerError {
+    #[error(transparent)]
+    ApduError(#[from] Error),
+}
+
 impl<T: CkTransport> Authentication<T> for TapSigner<T> {
     fn secp(&self) -> &Secp256k1<All> {
         &self.secp

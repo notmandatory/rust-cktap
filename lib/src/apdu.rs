@@ -23,19 +23,24 @@ pub const CARD_NONCE_SIZE: usize = 16;
 pub const USER_NONCE_SIZE: usize = 16;
 
 // Errors
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
+    #[error("CiborDe: {0}")]
     CiborDe(String),
+    #[error("CiborValue: {0}")]
     CiborValue(String),
-    CkTap {
-        error: String,
-        code: usize,
-    },
+    #[error("CkTap: {error}, code: {code}")]
+    CkTap { error: String, code: usize },
+    #[error("IncorrectSignature: {0}")]
     IncorrectSignature(String),
+
+    #[error("UnknownCardType: {0}")]
     UnknownCardType(String),
     #[cfg(feature = "pcsc")]
+    #[error("PcSc: {0}")]
     PcSc(String),
     #[cfg(feature = "emulator")]
+    #[error("Emulator: {0}")]
     Emulator(String),
 }
 
