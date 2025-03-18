@@ -65,6 +65,10 @@ enum TapSignerCommand {
         #[clap(short, long, value_delimiter = ',', num_args = 1..)]
         path: Vec<u32>,
     },
+    /// Get a an encrypted backup of the card's private key
+    Backup,
+    /// Change the PIN (CVC) used for card authentication to a new user provided one
+    Change { new_cvc: String },
 }
 
 #[tokio::main]
@@ -121,6 +125,16 @@ async fn main() -> Result<(), Error> {
                 TapSignerCommand::Derive { path } => {
                     dbg!(&ts.derive(path, cvc()).await);
                 }
+
+                TapSignerCommand::Backup => {
+                    let response = &ts.backup(&cvc()).await;
+                    dbg!(response);
+                }
+
+                TapSignerCommand::Change { new_cvc } => {
+                    let response = &ts.change(&new_cvc, &cvc()).await;
+                    dbg!(response);
+                }
             }
         }
     }
@@ -130,9 +144,9 @@ async fn main() -> Result<(), Error> {
 
 // handler functions for each command
 
-async fn check_cert<C, T: CkTransport>(card: &mut C) 
-where 
-    C: Certificate<T>
+async fn check_cert<C, T: CkTransport>(card: &mut C)
+where
+    C: Certificate<T>,
 {
     if let Ok(k) = card.check_certificate().await {
         println!(
@@ -144,9 +158,9 @@ where
     }
 }
 
-async fn read<C, T: CkTransport>(card: &mut C, cvc: Option<String>) 
-where 
-    C: Read<T>
+async fn read<C, T: CkTransport>(card: &mut C, cvc: Option<String>)
+where
+    C: Read<T>,
 {
     match card.read(cvc).await {
         Ok(resp) => println!("{}", resp),
