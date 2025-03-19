@@ -55,13 +55,13 @@ impl<T: CkTransport> Authentication<T> for SatsCard<T> {
 
 impl<T: CkTransport> SatsCard<T> {
     pub fn from_status(transport: T, status_response: StatusResponse) -> Result<Self, Error> {
-        let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
-        let pubkey = PublicKey::from_slice(pubkey)
-            .map_err(|e| Error::CiborValue(e.to_string()))
-            .unwrap();
+        let pubkey = status_response.pubkey.as_slice();
+        let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+
         let slots = status_response
             .slots
             .ok_or_else(|| Error::CiborValue("Missing slots".to_string()))?;
+
         Ok(Self {
             transport,
             secp: Secp256k1::new(),
@@ -84,12 +84,11 @@ impl<T: CkTransport> SatsCard<T> {
     ) -> Result<NewResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, NewCommand::name());
         let new_command = NewCommand::new(Some(slot), chain_code, epubkey, xcvc);
-        let new_response: Result<NewResponse, Error> = self.transport.transmit(new_command).await;
-        if let Ok(response) = &new_response {
-            self.card_nonce = response.card_nonce;
-            self.slots.0 = response.slot;
-        }
-        new_response
+        let new_response: NewResponse = self.transport.transmit(new_command).await?;
+        self.card_nonce = new_response.card_nonce;
+        self.slots.0 = new_response.slot;
+
+        Ok(new_response)
     }
 
     pub async fn derive(&mut self) -> Result<DeriveResponse, Error> {
@@ -97,37 +96,34 @@ impl<T: CkTransport> SatsCard<T> {
         let card_nonce = *self.card_nonce();
 
         let cmd = DeriveCommand::for_satscard(nonce);
-        let resp: Result<DeriveResponse, Error> = self.transport().transmit(cmd).await;
+        let resp: DeriveResponse = self.transport().transmit(cmd).await?;
+        self.set_card_nonce(resp.card_nonce);
 
-        if let Ok(r) = &resp {
-            self.set_card_nonce(r.card_nonce);
+        // Verify signature
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend("OPENDIME".as_bytes());
+        message_bytes.extend(card_nonce);
+        message_bytes.extend(nonce);
+        message_bytes.extend(resp.chain_code.clone());
 
-            // Verify signature
-            let mut message_bytes: Vec<u8> = Vec::new();
-            message_bytes.extend("OPENDIME".as_bytes());
-            message_bytes.extend(card_nonce);
-            message_bytes.extend(nonce);
-            message_bytes.extend(r.chain_code.clone());
+        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+        let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
-            let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
-            let message = Message::from_digest(message_bytes_hash.to_byte_array());
-            let signature = Signature::from_compact(r.sig.as_slice())
-                .expect("Failed to construct ECDSA signature from check response");
-            let pubkey = PublicKey::from_slice(r.master_pubkey.as_slice())?;
-            self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
-        }
-        resp
+        let signature = Signature::from_compact(resp.sig.as_slice())?;
+
+        let pubkey = PublicKey::from_slice(resp.master_pubkey.as_slice())?;
+        self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
+
+        Ok(resp)
     }
 
     pub async fn unseal(&mut self, slot: u8, cvc: String) -> Result<UnsealResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, UnsealCommand::name());
         let unseal_command = UnsealCommand::new(slot, epubkey, xcvc);
-        let unseal_response: Result<UnsealResponse, Error> =
-            self.transport.transmit(unseal_command).await;
-        if let Ok(response) = &unseal_response {
-            self.set_card_nonce(response.card_nonce)
-        }
-        unseal_response
+        let unseal_response: UnsealResponse = self.transport.transmit(unseal_command).await?;
+        self.set_card_nonce(unseal_response.card_nonce);
+
+        Ok(unseal_response)
     }
 
     pub async fn dump(&self, slot: usize, cvc: Option<String>) -> Result<DumpResponse, Error> {
@@ -168,11 +164,7 @@ impl<T: CkTransport> Read<T> for SatsCard<T> {
 }
 
 impl<T: CkTransport> Certificate<T> for SatsCard<T> {
-    fn message_digest(
-        &mut self,
-        card_nonce: [u8; 16],
-        app_nonce: [u8; 16],
-    ) -> Message {
+    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message {
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);

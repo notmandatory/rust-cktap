@@ -29,9 +29,10 @@ pub trait Authentication<T: CkTransport> {
         let nonce = Self::card_nonce(self);
         let cvc_bytes = cvc.as_bytes();
         let card_nonce_command = [nonce, command.as_bytes()].concat();
-        let (eprivkey, epubkey) = secp.generate_keypair(&mut rand::thread_rng());
-        let session_key = SharedSecret::new(pubkey, &eprivkey);
+        let (ephemeral_private_key, ephemeral_public_key) =
+            secp.generate_keypair(&mut rand::thread_rng());
 
+        let session_key = SharedSecret::new(pubkey, &ephemeral_private_key);
         let md = sha256::Hash::hash(card_nonce_command.as_slice());
         let md: &[u8; 32] = md.as_ref();
 
@@ -44,7 +45,7 @@ pub trait Authentication<T: CkTransport> {
             .collect();
 
         let xcvc = cvc_bytes.iter().zip(mask).map(|(x, y)| x ^ y).collect();
-        (eprivkey, epubkey, xcvc)
+        (ephemeral_private_key, ephemeral_public_key, xcvc)
     }
 }
 
@@ -71,17 +72,18 @@ pub trait CkTransport: Sized {
 
             // Return correct card variant using status
             match (status_response.tapsigner, status_response.satschip) {
-                (Some(true), None) => Ok(CkTapCard::TapSigner(TapSigner::from_status(
-                    self,
-                    status_response,
-                ))),
-                (Some(true), Some(true)) => Ok(CkTapCard::TapSigner(TapSigner::from_status(
-                    self,
-                    status_response,
-                ))),
-                (None, None) => Ok(CkTapCard::SatsCard(
-                    SatsCard::from_status(self, status_response).unwrap(),
-                )),
+                (Some(true), None) => {
+                    let tap_signer = TapSigner::try_from_status(self, status_response)?;
+                    Ok(CkTapCard::TapSigner(tap_signer))
+                }
+                (Some(true), Some(true)) => {
+                    let tap_signer = TapSigner::try_from_status(self, status_response)?;
+                    Ok(CkTapCard::TapSigner(tap_signer))
+                }
+                (None, None) => {
+                    let sats_card = SatsCard::from_status(self, status_response)?;
+                    Ok(CkTapCard::SatsCard(sats_card))
+                }
                 (_, _) => Err(Error::UnknownCardType("Card not recognized.".to_string())),
             }
         }
@@ -102,8 +104,8 @@ where
             let app_nonce = rand_nonce();
 
             let (cmd, session_key) = if self.requires_auth() {
-                let (eprivkey, epubkey, xcvc) =
-                    self.calc_ekeys_xcvc(cvc.as_ref().unwrap(), ReadCommand::name());
+                let (eprivkey, epubkey, xcvc) = self
+                    .calc_ekeys_xcvc(cvc.as_ref().expect("cvc is required"), ReadCommand::name());
                 (
                     ReadCommand::authenticated(app_nonce, epubkey, xcvc),
                     Some(SharedSecret::new(self.pubkey(), &eprivkey)),
@@ -112,16 +114,17 @@ where
                 (ReadCommand::unauthenticated(app_nonce), None)
             };
 
-            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd).await;
-            if let Ok(response) = &read_response {
-                self.secp().verify_ecdsa(
-                    &self.message_digest(card_nonce, app_nonce.to_vec()),
-                    &response.signature()?, // or add 'from' trait: Signature::from(response.sig: )
-                    &response.pubkey(session_key),
-                )?;
-                self.set_card_nonce(response.card_nonce);
-            }
-            read_response
+            let read_response: ReadResponse = self.transport().transmit(cmd).await?;
+
+            self.secp().verify_ecdsa(
+                &self.message_digest(card_nonce, app_nonce.to_vec()),
+                &read_response.signature()?, // or add 'from' trait: Signature::from(response.sig: )
+                &read_response.pubkey(session_key)?,
+            )?;
+
+            self.set_card_nonce(read_response.card_nonce);
+
+            Ok(read_response)
         }
     }
 
@@ -130,6 +133,7 @@ where
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
         message_bytes.extend(app_nonce);
+
         if let Some(slot) = self.slot() {
             message_bytes.push(slot);
         } else {
@@ -157,16 +161,15 @@ where
                 .unwrap_or((None, None));
 
             let wait_command = WaitCommand::new(epubkey, xcvc);
-            let wait_response: Result<WaitResponse, Error> =
-                self.transport().transmit(wait_command).await;
-            if let Ok(response) = &wait_response {
-                if response.auth_delay > 0 {
-                    self.set_auth_delay(Some(response.auth_delay));
-                } else {
-                    self.set_auth_delay(None);
-                }
+
+            let wait_response: WaitResponse = self.transport().transmit(wait_command).await?;
+            if wait_response.auth_delay > 0 {
+                self.set_auth_delay(Some(wait_response.auth_delay));
+            } else {
+                self.set_auth_delay(None);
             }
-            wait_response
+
+            Ok(wait_response)
         }
     }
 }
@@ -187,13 +190,10 @@ where
             let certs_response: CertsResponse = self.transport().transmit(certs_cmd).await?;
 
             let check_cmd = CheckCommand::new(nonce);
-            let check_response: Result<CheckResponse, Error> =
-                self.transport().transmit(check_cmd).await;
-            if let Ok(response) = &check_response {
-                self.set_card_nonce(response.card_nonce);
-            }
+            let check_response: CheckResponse = self.transport().transmit(check_cmd).await?;
 
-            self.verify_card_signature(check_response.unwrap().auth_sig, card_nonce, nonce)?;
+            self.set_card_nonce(check_response.card_nonce);
+            self.verify_card_signature(check_response.auth_sig, card_nonce, nonce)?;
 
             let mut pubkey = *self.pubkey();
             for sig in &certs_response.cert_chain() {
@@ -205,13 +205,14 @@ where
                     39..=42 => 39, // Segwit Bech32
                     _ => panic!("Unrecognized BIP-137 address"),
                 };
-                let rec_id = RecoveryId::try_from((sig[0] as i32) - subtract_by).unwrap();
+
+                let rec_id = RecoveryId::try_from((sig[0] as i32) - subtract_by)?;
                 let (_, sig) = sig.split_at(1);
-                let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
+                let rec_sig = RecoverableSignature::from_compact(sig, rec_id)?;
 
                 let pubkey_hash = sha256::Hash::hash(&pubkey.serialize_uncompressed());
                 let md = Message::from_digest(pubkey_hash.to_byte_array());
-                pubkey = self.secp().recover_ecdsa(&md, &rec_sig).unwrap();
+                pubkey = self.secp().recover_ecdsa(&md, &rec_sig)?;
             }
 
             FactoryRootKey::try_from(pubkey)

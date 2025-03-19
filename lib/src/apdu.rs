@@ -94,12 +94,14 @@ pub trait ResponseApdu {
     {
         let cbor_value: Value = from_reader(&cbor[..])?;
         let cbor_struct: Result<ErrorResponse, _> = cbor_value.deserialized();
+
         if let Ok(error_resp) = cbor_struct {
             return Err(Error::CkTap {
                 error: error_resp.error,
                 code: error_resp.code,
             });
         }
+
         let cbor_struct: Self = cbor_value.deserialized()?;
         Ok(cbor_struct)
     }
@@ -237,17 +239,17 @@ impl ResponseApdu for ReadResponse {}
 impl ReadResponse {
     pub fn signature(&self) -> Result<Signature, Error> {
         Signature::from_compact(self.sig.as_slice()).map_err(|e| Error::CiborValue(e.to_string()))
-        // .expect("Failed to construct ECDSA signature from ReadResponse")
     }
 
-    pub fn pubkey(&self, session_key: Option<SharedSecret>) -> PublicKey {
-        let pubkey = if let Some(sk) = session_key {
-            unzip(&self.pubkey, sk)
-        } else {
-            self.pubkey.clone()
+    pub fn pubkey(&self, session_key: Option<SharedSecret>) -> Result<PublicKey, Error> {
+        if let Some(sk) = session_key {
+            let pubkey_bytes = unzip(&self.pubkey, sk);
+            return PublicKey::from_slice(pubkey_bytes.as_slice())
+                .map_err(|e| Error::CiborValue(e.to_string()));
         };
-        PublicKey::from_slice(pubkey.as_slice())
-            .expect("Failed to construct a PublicKey from ReadResponse")
+
+        let pubkey_bytes = self.pubkey.as_slice();
+        PublicKey::from_slice(pubkey_bytes).map_err(|e| Error::CiborValue(e.to_string()))
     }
 }
 

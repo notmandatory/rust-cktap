@@ -71,12 +71,11 @@ impl<T: CkTransport> Authentication<T> for TapSigner<T> {
 }
 
 impl<T: CkTransport> TapSigner<T> {
-    pub fn from_status(transport: T, status_response: StatusResponse) -> Self {
-        let pubkey = status_response.pubkey.as_slice(); // TODO verify is 33 bytes?
-        let pubkey = PublicKey::from_slice(pubkey)
-            .map_err(|e| Error::CiborValue(e.to_string()))
-            .unwrap();
-        Self {
+    pub fn try_from_status(transport: T, status_response: StatusResponse) -> Result<Self, Error> {
+        let pubkey = status_response.pubkey.as_slice();
+        let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+
+        Ok(Self {
             transport,
             secp: Secp256k1::new(),
             proto: status_response.proto,
@@ -87,7 +86,7 @@ impl<T: CkTransport> TapSigner<T> {
             pubkey,
             card_nonce: status_response.card_nonce,
             auth_delay: status_response.auth_delay,
-        }
+        })
     }
 
     pub async fn init(
