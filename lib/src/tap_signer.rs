@@ -30,14 +30,20 @@ pub enum TapSignerError {
     #[error(transparent)]
     ApduError(#[from] Error),
 
+    #[error(transparent)]
+    CvcChangeError(#[from] CvcChangeError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum CvcChangeError {
     #[error("new cvc is too short, must be at least 6 bytes, was only {0} bytes")]
-    NewCvcTooShort(usize),
+    TooShort(usize),
 
     #[error("new cvc is too long, must be at most 32 bytes, was {0} bytes")]
-    NewCvcTooLong(usize),
+    TooLong(usize),
 
     #[error("new cvc is the same as the old one")]
-    NewCvcSameAsOld,
+    SameAsOld,
 }
 
 impl<T: CkTransport> Authentication<T> for TapSigner<T> {
@@ -145,15 +151,15 @@ impl<T: CkTransport> TapSigner<T> {
         cvc: &str,
     ) -> Result<ChangeResponse, TapSignerError> {
         if new_cvc.len() < 6 {
-            return Err(TapSignerError::NewCvcTooShort(new_cvc.len()));
+            return Err(CvcChangeError::TooShort(new_cvc.len()).into());
         }
 
         if new_cvc.len() > 32 {
-            return Err(TapSignerError::NewCvcTooLong(new_cvc.len()));
+            return Err(CvcChangeError::TooLong(new_cvc.len()).into());
         }
 
         if new_cvc == cvc {
-            return Err(TapSignerError::NewCvcSameAsOld);
+            return Err(CvcChangeError::SameAsOld.into());
         }
 
         // Create session key and encrypt current CVC
