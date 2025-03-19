@@ -3,6 +3,7 @@ uniffi::setup_scaffolding!();
 extern crate core;
 pub extern crate secp256k1;
 
+use commands::CkTransport;
 use secp256k1::rand::{self, rngs::ThreadRng, Rng};
 
 pub mod apdu;
@@ -17,9 +18,6 @@ pub mod pcsc;
 pub mod sats_card;
 pub mod tap_signer;
 
-use apdu::*;
-use commands::*;
-
 pub type TapSigner<T> = tap_signer::TapSigner<T>;
 pub type SatsCard<T> = sats_card::SatsCard<T>;
 
@@ -28,6 +26,9 @@ pub enum CkTapCard<T: CkTransport> {
     TapSigner(TapSigner<T>),
     SatsChip(TapSigner<T>),
 }
+
+// re-export
+pub use apdu::Error;
 
 impl<T: CkTransport> core::fmt::Debug for CkTapCard<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
