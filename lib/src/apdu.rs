@@ -918,3 +918,50 @@ impl Debug for XpubResponse {
             .finish()
     }
 }
+
+/// TAPSIGNER only - Change the CVC of the card.  Changes from the value on the card.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct ChangeCVCCommand {
+    cmd: String, // "change"
+    #[serde(with = "serde_bytes")]
+    data: Vec<u8>, // new CVC, encrypted
+    #[serde(with = "serde_bytes")]
+    epubkey: Vec<u8>, // app's ephemeral public key (required)
+    #[serde(with = "serde_bytes")]
+    xcvc: Vec<u8>, //encrypted CVC value (required)
+}
+
+impl CommandApdu for ChangeCVCCommand {
+    fn name() -> String {
+        "change".to_string()
+    }
+}
+
+impl ChangeCVCCommand {
+    pub fn new(data: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+        Self {
+            cmd: Self::name(),
+            data,
+            epubkey: epubkey.serialize().to_vec(),
+            xcvc,
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct ChangeCVCResponse {
+    pub success: bool,
+    #[serde(with = "serde_bytes")]
+    pub card_nonce: Vec<u8>,
+}
+
+impl ResponseApdu for ChangeCVCResponse {}
+
+impl Debug for ChangeCVCResponse {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("ChangeCVCResponse")
+            .field("success", &self.success)
+            .field("card_nonce", &self.card_nonce.to_hex())
+            .finish()
+    }
+}
