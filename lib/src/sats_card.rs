@@ -79,12 +79,12 @@ impl<T: CkTransport> SatsCard<T> {
     pub async fn new_slot(
         &mut self,
         slot: u8,
-        chain_code: Option<Vec<u8>>,
+        chain_code: Option<[u8; 32]>,
         cvc: String,
     ) -> Result<NewResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, NewCommand::name());
         let new_command = NewCommand::new(Some(slot), chain_code, epubkey, xcvc);
-        let new_response: NewResponse = self.transport.transmit(new_command).await?;
+        let new_response: NewResponse = self.transport.transmit(&new_command).await?;
         self.card_nonce = new_response.card_nonce;
         self.slots.0 = new_response.slot;
 
@@ -96,7 +96,7 @@ impl<T: CkTransport> SatsCard<T> {
         let card_nonce = *self.card_nonce();
 
         let cmd = DeriveCommand::for_satscard(nonce);
-        let resp: DeriveResponse = self.transport().transmit(cmd).await?;
+        let resp: DeriveResponse = self.transport().transmit(&cmd).await?;
         self.set_card_nonce(resp.card_nonce);
 
         // Verify signature
@@ -120,7 +120,7 @@ impl<T: CkTransport> SatsCard<T> {
     pub async fn unseal(&mut self, slot: u8, cvc: String) -> Result<UnsealResponse, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, UnsealCommand::name());
         let unseal_command = UnsealCommand::new(slot, epubkey, xcvc);
-        let unseal_response: UnsealResponse = self.transport.transmit(unseal_command).await?;
+        let unseal_response: UnsealResponse = self.transport.transmit(&unseal_command).await?;
         self.set_card_nonce(unseal_response.card_nonce);
 
         Ok(unseal_response)
@@ -137,7 +137,7 @@ impl<T: CkTransport> SatsCard<T> {
             .unwrap_or((None, None));
 
         let dump_command = DumpCommand::new(slot, epubkey, xcvc);
-        self.transport.transmit(dump_command).await
+        self.transport.transmit(&dump_command).await
     }
 
     pub fn address(&mut self) -> Result<String, Error> {

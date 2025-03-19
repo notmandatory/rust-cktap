@@ -97,13 +97,13 @@ impl<T: CkTransport> TapSigner<T> {
 
     pub async fn init(
         &mut self,
-        chain_code: Vec<u8>,
-        cvc: String,
+        chain_code: [u8; 32],
+        cvc: &str,
     ) -> Result<NewResponse, TapSignerError> {
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, NewCommand::name());
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, NewCommand::name());
 
         let new_command = NewCommand::new(Some(0), Some(chain_code), epubkey, xcvc);
-        let new_response: NewResponse = self.transport.transmit(new_command).await?;
+        let new_response: NewResponse = self.transport.transmit(&new_command).await?;
 
         self.card_nonce = new_response.card_nonce;
         Ok(new_response)
@@ -119,7 +119,7 @@ impl<T: CkTransport> TapSigner<T> {
         let app_nonce = crate::rand_nonce();
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DeriveCommand::name());
         let cmd = DeriveCommand::for_tapsigner(app_nonce, path, epubkey, xcvc);
-        let derive_response: DeriveResponse = self.transport.transmit(cmd).await?;
+        let derive_response: DeriveResponse = self.transport.transmit(&cmd).await?;
 
         let card_nonce = self.card_nonce();
         let sig = &derive_response.sig;
@@ -177,7 +177,7 @@ impl<T: CkTransport> TapSigner<T> {
             .collect();
 
         let change_command = ChangeCommand::new(xnew_cvc, epubkey, xcvc);
-        let change_response: ChangeResponse = self.transport.transmit(change_command).await?;
+        let change_response: ChangeResponse = self.transport.transmit(&change_command).await?;
 
         self.card_nonce = change_response.card_nonce;
         Ok(change_response)
@@ -187,7 +187,7 @@ impl<T: CkTransport> TapSigner<T> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, "backup");
 
         let backup_command = BackupCommand::new(epubkey, xcvc);
-        let backup_response: BackupResponse = self.transport.transmit(backup_command).await?;
+        let backup_response: BackupResponse = self.transport.transmit(&backup_command).await?;
 
         self.card_nonce = backup_response.card_nonce;
         Ok(backup_response)

@@ -662,7 +662,7 @@ pub struct NewCommand {
     slot: u8,
     /// app's entropy share to be applied to new slot (optional on SATSCARD)
     #[serde(with = "serde_bytes")]
-    chain_code: Option<Vec<u8>>, // 32 bytes
+    chain_code: Option<[u8; 32]>, // 32 bytes
     /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
     epubkey: [u8; 33],
@@ -674,7 +674,7 @@ pub struct NewCommand {
 impl NewCommand {
     pub fn new(
         slot: Option<u8>,
-        chain_code: Option<Vec<u8>>,
+        chain_code: Option<[u8; 32]>,
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {

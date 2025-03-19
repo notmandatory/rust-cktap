@@ -95,7 +95,7 @@ async fn main() -> Result<(), Error> {
                 SatsCardCommand::Read => read(sc, None).await,
                 SatsCardCommand::New => {
                     let slot = sc.slot().expect("current slot number");
-                    let chain_code = Some(rand_chaincode(rng).to_vec());
+                    let chain_code = Some(rand_chaincode(rng));
                     let response = &sc.new_slot(slot, chain_code, cvc()).await.unwrap();
                     println!("{}", response)
                 }
@@ -118,8 +118,8 @@ async fn main() -> Result<(), Error> {
                 TapSignerCommand::Certs => check_cert(ts).await,
                 TapSignerCommand::Read => read(ts, Some(cvc())).await,
                 TapSignerCommand::Init => {
-                    let chain_code = rand_chaincode(rng).to_vec();
-                    let response = &ts.init(chain_code, cvc()).await;
+                    let chain_code = rand_chaincode(rng);
+                    let response = &ts.init(chain_code, &cvc()).await;
                     dbg!(response);
                 }
                 TapSignerCommand::Derive { path } => {

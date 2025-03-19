@@ -50,7 +50,7 @@ pub trait Authentication<T: CkTransport> {
 }
 
 pub trait CkTransport: Sized {
-    fn transmit<C, R>(&self, command: C) -> impl Future<Output = Result<R, Error>>
+    fn transmit<C, R>(&self, command: &C) -> impl Future<Output = Result<R, Error>>
     where
         C: CommandApdu + serde::Serialize + Debug,
         R: ResponseApdu + serde::de::DeserializeOwned + Debug,
@@ -68,7 +68,7 @@ pub trait CkTransport: Sized {
         async {
             // Get status from card
             let cmd = AppletSelect::default();
-            let status_response: StatusResponse = self.transmit(cmd).await?;
+            let status_response: StatusResponse = self.transmit(&cmd).await?;
 
             // Return correct card variant using status
             match (status_response.tapsigner, status_response.satschip) {
@@ -114,7 +114,7 @@ where
                 (ReadCommand::unauthenticated(app_nonce), None)
             };
 
-            let read_response: ReadResponse = self.transport().transmit(cmd).await?;
+            let read_response: ReadResponse = self.transport().transmit(&cmd).await?;
 
             self.secp().verify_ecdsa(
                 &self.message_digest(card_nonce, app_nonce.to_vec()),
@@ -162,7 +162,7 @@ where
 
             let wait_command = WaitCommand::new(epubkey, xcvc);
 
-            let wait_response: WaitResponse = self.transport().transmit(wait_command).await?;
+            let wait_response: WaitResponse = self.transport().transmit(&wait_command).await?;
             if wait_response.auth_delay > 0 {
                 self.set_auth_delay(Some(wait_response.auth_delay));
             } else {
@@ -187,10 +187,10 @@ where
             let card_nonce = *self.card_nonce();
 
             let certs_cmd = CertsCommand::default();
-            let certs_response: CertsResponse = self.transport().transmit(certs_cmd).await?;
+            let certs_response: CertsResponse = self.transport().transmit(&certs_cmd).await?;
 
             let check_cmd = CheckCommand::new(nonce);
-            let check_response: CheckResponse = self.transport().transmit(check_cmd).await?;
+            let check_response: CheckResponse = self.transport().transmit(&check_cmd).await?;
 
             self.set_card_nonce(check_response.card_nonce);
             self.verify_card_signature(check_response.auth_sig, card_nonce, nonce)?;
