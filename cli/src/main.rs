@@ -123,7 +123,7 @@ async fn main() -> Result<(), Error> {
                     dbg!(response);
                 }
                 TapSignerCommand::Derive { path } => {
-                    dbg!(&ts.derive(path, cvc()).await);
+                    dbg!(&ts.derive(&path, &cvc()).await);
                 }
 
                 TapSignerCommand::Backup => {
