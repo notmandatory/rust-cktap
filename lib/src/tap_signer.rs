@@ -111,13 +111,13 @@ impl<T: CkTransport> TapSigner<T> {
 
     pub async fn derive(
         &mut self,
-        path: Vec<u32>,
-        cvc: String,
+        path: &[u32],
+        cvc: &str,
     ) -> Result<DeriveResponse, TapSignerError> {
         // set most significant bit to 1 to represent hardened path steps
         let path = path.iter().map(|p| p ^ (1 << 31)).collect();
         let app_nonce = crate::rand_nonce();
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DeriveCommand::name());
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, DeriveCommand::name());
         let cmd = DeriveCommand::for_tapsigner(app_nonce, path, epubkey, xcvc);
         let derive_response: DeriveResponse = self.transport.transmit(&cmd).await?;
 
