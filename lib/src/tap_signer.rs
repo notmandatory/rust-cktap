@@ -133,10 +133,12 @@ impl<T: CkTransport> TapSigner<T> {
         let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
         let signature = Signature::from_compact(sig.as_slice()).map_err(Error::from)?;
-        let pubkey =
-            PublicKey::from_slice(derive_response.master_pubkey.as_slice()).map_err(Error::from)?;
+        let pubkey = match &derive_response.pubkey {
+            Some(pubkey) => PublicKey::from_slice(pubkey.as_slice()).map_err(Error::from)?,
+            None => PublicKey::from_slice(derive_response.master_pubkey.as_slice())
+                .map_err(Error::from)?,
+        };
 
-        // TODO fix verify when a derivation path is used, currently only works if no path given
         self.secp()
             .verify_ecdsa(&message, &signature, &pubkey)
             .map_err(Error::from)?;
