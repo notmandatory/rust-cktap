@@ -16,23 +16,23 @@ use std::future::Future;
 pub trait Authentication<T: CkTransport> {
     fn secp(&self) -> &Secp256k1<All>;
     fn pubkey(&self) -> &PublicKey;
-    fn card_nonce(&self) -> &Vec<u8>;
-    fn set_card_nonce(&mut self, new_nonce: Vec<u8>);
+    fn card_nonce(&self) -> &[u8; 16];
+    fn set_card_nonce(&mut self, new_nonce: [u8; 16]);
     fn auth_delay(&self) -> &Option<usize>;
     fn set_auth_delay(&mut self, auth_delay: Option<usize>);
 
     fn transport(&self) -> &T;
 
-    fn calc_ekeys_xcvc(&self, cvc: String, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
+    fn calc_ekeys_xcvc(&self, cvc: &str, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
         let secp = Self::secp(self);
         let pubkey = Self::pubkey(self);
         let nonce = Self::card_nonce(self);
         let cvc_bytes = cvc.as_bytes();
-        let card_nonce_bytes = nonce.as_slice();
-        let card_nonce_command = [card_nonce_bytes, command.as_bytes()].concat();
-        let (eprivkey, epubkey) = secp.generate_keypair(&mut rand::thread_rng());
-        let session_key = SharedSecret::new(pubkey, &eprivkey);
+        let card_nonce_command = [nonce, command.as_bytes()].concat();
+        let (ephemeral_private_key, ephemeral_public_key) =
+            secp.generate_keypair(&mut rand::thread_rng());
 
+        let session_key = SharedSecret::new(pubkey, &ephemeral_private_key);
         let md = sha256::Hash::hash(card_nonce_command.as_slice());
         let md: &[u8; 32] = md.as_ref();
 
@@ -43,13 +43,14 @@ pub trait Authentication<T: CkTransport> {
             .map(|(x, y)| x ^ y)
             .take(cvc_bytes.len())
             .collect();
+
         let xcvc = cvc_bytes.iter().zip(mask).map(|(x, y)| x ^ y).collect();
-        (eprivkey, epubkey, xcvc)
+        (ephemeral_private_key, ephemeral_public_key, xcvc)
     }
 }
 
 pub trait CkTransport: Sized {
-    fn transmit<C, R>(&self, command: C) -> impl Future<Output = Result<R, Error>>
+    fn transmit<C, R>(&self, command: &C) -> impl Future<Output = Result<R, Error>>
     where
         C: CommandApdu + serde::Serialize + Debug,
         R: ResponseApdu + serde::de::DeserializeOwned + Debug,
@@ -67,21 +68,22 @@ pub trait CkTransport: Sized {
         async {
             // Get status from card
             let cmd = AppletSelect::default();
-            let status_response: StatusResponse = self.transmit(cmd).await?;
+            let status_response: StatusResponse = self.transmit(&cmd).await?;
 
             // Return correct card variant using status
             match (status_response.tapsigner, status_response.satschip) {
-                (Some(true), None) => Ok(CkTapCard::TapSigner(TapSigner::from_status(
-                    self,
-                    status_response,
-                ))),
-                (Some(true), Some(true)) => Ok(CkTapCard::TapSigner(TapSigner::from_status(
-                    self,
-                    status_response,
-                ))),
-                (None, None) => Ok(CkTapCard::SatsCard(
-                    SatsCard::from_status(self, status_response).unwrap(),
-                )),
+                (Some(true), None) => {
+                    let tap_signer = TapSigner::try_from_status(self, status_response)?;
+                    Ok(CkTapCard::TapSigner(tap_signer))
+                }
+                (Some(true), Some(true)) => {
+                    let tap_signer = TapSigner::try_from_status(self, status_response)?;
+                    Ok(CkTapCard::TapSigner(tap_signer))
+                }
+                (None, None) => {
+                    let sats_card = SatsCard::from_status(self, status_response)?;
+                    Ok(CkTapCard::SatsCard(sats_card))
+                }
                 (_, _) => Err(Error::UnknownCardType("Card not recognized.".to_string())),
             }
         }
@@ -98,38 +100,40 @@ where
 
     fn read(&mut self, cvc: Option<String>) -> impl Future<Output = Result<ReadResponse, Error>> {
         async move {
-            let card_nonce = self.card_nonce().clone();
+            let card_nonce = *self.card_nonce();
             let app_nonce = rand_nonce();
 
             let (cmd, session_key) = if self.requires_auth() {
-                let (eprivkey, epubkey, xcvc) =
-                    self.calc_ekeys_xcvc(cvc.unwrap(), &ReadCommand::name());
+                let (eprivkey, epubkey, xcvc) = self
+                    .calc_ekeys_xcvc(cvc.as_ref().expect("cvc is required"), ReadCommand::name());
                 (
-                    ReadCommand::authenticated(app_nonce.clone(), epubkey, xcvc),
+                    ReadCommand::authenticated(app_nonce, epubkey, xcvc),
                     Some(SharedSecret::new(self.pubkey(), &eprivkey)),
                 )
             } else {
-                (ReadCommand::unauthenticated(app_nonce.clone()), None)
+                (ReadCommand::unauthenticated(app_nonce), None)
             };
 
-            let read_response: Result<ReadResponse, Error> = self.transport().transmit(cmd).await;
-            if let Ok(response) = &read_response {
-                self.secp().verify_ecdsa(
-                    &self.message_digest(card_nonce, app_nonce),
-                    &response.signature()?, // or add 'from' trait: Signature::from(response.sig: )
-                    &response.pubkey(session_key),
-                )?;
-                self.set_card_nonce(response.card_nonce.clone());
-            }
-            read_response
+            let read_response: ReadResponse = self.transport().transmit(&cmd).await?;
+
+            self.secp().verify_ecdsa(
+                &self.message_digest(card_nonce, app_nonce.to_vec()),
+                &read_response.signature()?, // or add 'from' trait: Signature::from(response.sig: )
+                &read_response.pubkey(session_key)?,
+            )?;
+
+            self.set_card_nonce(read_response.card_nonce);
+
+            Ok(read_response)
         }
     }
 
-    fn message_digest(&self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message {
+    fn message_digest(&self, card_nonce: [u8; 16], app_nonce: Vec<u8>) -> Message {
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
         message_bytes.extend(app_nonce);
+
         if let Some(slot) = self.slot() {
             message_bytes.push(slot);
         } else {
@@ -148,25 +152,24 @@ where
     fn wait(&mut self, cvc: Option<String>) -> impl Future<Output = Result<WaitResponse, Error>> {
         async move {
             let epubkey_xcvc = cvc.map(|cvc| {
-                let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, &WaitCommand::name());
+                let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, WaitCommand::name());
                 (epubkey, xcvc)
             });
 
             let (epubkey, xcvc) = epubkey_xcvc
-                .map(|(epubkey, xcvc)| (Some(epubkey.serialize().to_vec()), Some(xcvc)))
+                .map(|(epubkey, xcvc)| (Some(epubkey.serialize()), Some(xcvc)))
                 .unwrap_or((None, None));
 
             let wait_command = WaitCommand::new(epubkey, xcvc);
-            let wait_response: Result<WaitResponse, Error> =
-                self.transport().transmit(wait_command).await;
-            if let Ok(response) = &wait_response {
-                if response.auth_delay > 0 {
-                    self.set_auth_delay(Some(response.auth_delay));
-                } else {
-                    self.set_auth_delay(None);
-                }
+
+            let wait_response: WaitResponse = self.transport().transmit(&wait_command).await?;
+            if wait_response.auth_delay > 0 {
+                self.set_auth_delay(Some(wait_response.auth_delay));
+            } else {
+                self.set_auth_delay(None);
             }
-            wait_response
+
+            Ok(wait_response)
         }
     }
 }
@@ -175,25 +178,22 @@ pub trait Certificate<T>: Authentication<T>
 where
     T: CkTransport,
 {
-    fn message_digest(&mut self, card_nonce: Vec<u8>, app_nonce: Vec<u8>) -> Message;
+    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message;
 
     fn check_certificate(&mut self) -> impl Future<Output = Result<FactoryRootKey, Error>> {
         async {
             let nonce = rand_nonce();
 
-            let card_nonce = self.card_nonce().clone();
+            let card_nonce = *self.card_nonce();
 
             let certs_cmd = CertsCommand::default();
-            let certs_response: CertsResponse = self.transport().transmit(certs_cmd).await?;
+            let certs_response: CertsResponse = self.transport().transmit(&certs_cmd).await?;
 
-            let check_cmd = CheckCommand::new(nonce.clone());
-            let check_response: Result<CheckResponse, Error> =
-                self.transport().transmit(check_cmd).await;
-            if let Ok(response) = &check_response {
-                self.set_card_nonce(response.card_nonce.clone());
-            }
+            let check_cmd = CheckCommand::new(nonce);
+            let check_response: CheckResponse = self.transport().transmit(&check_cmd).await?;
 
-            self.verify_card_signature(check_response.unwrap().auth_sig, card_nonce, nonce)?;
+            self.set_card_nonce(check_response.card_nonce);
+            self.verify_card_signature(check_response.auth_sig, card_nonce, nonce)?;
 
             let mut pubkey = *self.pubkey();
             for sig in &certs_response.cert_chain() {
@@ -205,13 +205,14 @@ where
                     39..=42 => 39, // Segwit Bech32
                     _ => panic!("Unrecognized BIP-137 address"),
                 };
-                let rec_id = RecoveryId::try_from((sig[0] as i32) - subtract_by).unwrap();
+
+                let rec_id = RecoveryId::try_from((sig[0] as i32) - subtract_by)?;
                 let (_, sig) = sig.split_at(1);
-                let rec_sig = RecoverableSignature::from_compact(sig, rec_id).unwrap();
+                let rec_sig = RecoverableSignature::from_compact(sig, rec_id)?;
 
                 let pubkey_hash = sha256::Hash::hash(&pubkey.serialize_uncompressed());
                 let md = Message::from_digest(pubkey_hash.to_byte_array());
-                pubkey = self.secp().recover_ecdsa(&md, &rec_sig).unwrap();
+                pubkey = self.secp().recover_ecdsa(&md, &rec_sig)?;
             }
 
             FactoryRootKey::try_from(pubkey)
@@ -221,8 +222,8 @@ where
     fn verify_card_signature(
         &mut self,
         signature: Vec<u8>,
-        card_nonce: Vec<u8>,
-        app_nonce: Vec<u8>,
+        card_nonce: [u8; 16],
+        app_nonce: [u8; 16],
     ) -> Result<(), secp256k1::Error> {
         let message = self.message_digest(card_nonce, app_nonce);
         let signature = Signature::from_compact(signature.as_slice())

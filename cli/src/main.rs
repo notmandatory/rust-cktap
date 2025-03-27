@@ -65,6 +65,10 @@ enum TapSignerCommand {
         #[clap(short, long, value_delimiter = ',', num_args = 1..)]
         path: Vec<u32>,
     },
+    /// Get a an encrypted backup of the card's private key
+    Backup,
+    /// Change the PIN (CVC) used for card authentication to a new user provided one
+    Change { new_cvc: String },
 }
 
 #[tokio::main]
@@ -91,7 +95,7 @@ async fn main() -> Result<(), Error> {
                 SatsCardCommand::Read => read(sc, None).await,
                 SatsCardCommand::New => {
                     let slot = sc.slot().expect("current slot number");
-                    let chain_code = Some(rand_chaincode(rng).to_vec());
+                    let chain_code = Some(rand_chaincode(rng));
                     let response = &sc.new_slot(slot, chain_code, cvc()).await.unwrap();
                     println!("{}", response)
                 }
@@ -114,12 +118,22 @@ async fn main() -> Result<(), Error> {
                 TapSignerCommand::Certs => check_cert(ts).await,
                 TapSignerCommand::Read => read(ts, Some(cvc())).await,
                 TapSignerCommand::Init => {
-                    let chain_code = rand_chaincode(rng).to_vec();
-                    let response = &ts.init(chain_code, cvc()).await;
+                    let chain_code = rand_chaincode(rng);
+                    let response = &ts.init(chain_code, &cvc()).await;
                     dbg!(response);
                 }
                 TapSignerCommand::Derive { path } => {
-                    dbg!(&ts.derive(path, cvc()).await);
+                    dbg!(&ts.derive(&path, &cvc()).await);
+                }
+
+                TapSignerCommand::Backup => {
+                    let response = &ts.backup(&cvc()).await;
+                    println!("{:?}", response);
+                }
+
+                TapSignerCommand::Change { new_cvc } => {
+                    let response = &ts.change(&new_cvc, &cvc()).await;
+                    println!("{:?}", response);
                 }
             }
         }
@@ -130,9 +144,9 @@ async fn main() -> Result<(), Error> {
 
 // handler functions for each command
 
-async fn check_cert<C, T: CkTransport>(card: &mut C) 
-where 
-    C: Certificate<T>
+async fn check_cert<C, T: CkTransport>(card: &mut C)
+where
+    C: Certificate<T>,
 {
     if let Ok(k) = card.check_certificate().await {
         println!(
@@ -144,9 +158,9 @@ where
     }
 }
 
-async fn read<C, T: CkTransport>(card: &mut C, cvc: Option<String>) 
-where 
-    C: Read<T>
+async fn read<C, T: CkTransport>(card: &mut C, cvc: Option<String>)
+where
+    C: Read<T>,
 {
     match card.read(cvc).await {
         Ok(resp) => println!("{}", resp),
