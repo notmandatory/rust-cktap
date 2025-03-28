@@ -61,7 +61,7 @@ pub enum CkTapError {
     WeakNonce,
     #[error("Unable to decode CBOR data stream")]
     BadCBOR,
-    #[error("Can't change CVC without doing a backup first (TAPSIGNER only)")]
+    #[error("Can't change CVC without doing a backup first")]
     BackupFirst,
     #[error("Due to auth failures, delay required")]
     RateLimited,
