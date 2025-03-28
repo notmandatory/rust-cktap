@@ -147,12 +147,13 @@ impl<T: CkTransport> TapSigner<T> {
         };
 
         // TODO: actually return as error when we can figure out why its not working on the card
-        if let Err(e) = self
+        if self
             .secp()
             .verify_ecdsa(&message, &signature, &pubkey)
             .map_err(Error::from)
+            .is_err()
         {
-            println!("verify ecdsa failed: {e:?}");
+            println!("verify derive command ecdsa signature failed");
         };
 
         self.card_nonce = derive_response.card_nonce;
