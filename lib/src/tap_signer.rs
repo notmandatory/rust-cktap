@@ -6,7 +6,7 @@ use secp256k1::{
 
 use crate::apdu::{
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
-    CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand, NewResponse,
+    CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand, NewResponse, StatusCommand,
     StatusResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
@@ -107,6 +107,12 @@ impl<T: CkTransport> TapSigner<T> {
 
         self.card_nonce = new_response.card_nonce;
         Ok(new_response)
+    }
+
+    pub async fn status(&mut self) -> Result<StatusResponse, Error> {
+        let cmd = StatusCommand::default();
+        let status_response: StatusResponse = self.transport.transmit(&cmd).await?;
+        Ok(status_response)
     }
 
     pub async fn derive(
