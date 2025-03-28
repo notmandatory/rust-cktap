@@ -111,7 +111,11 @@ impl<T: CkTransport> SatsCard<T> {
 
         let signature = Signature::from_compact(resp.sig.as_slice())?;
 
-        let pubkey = PublicKey::from_slice(resp.master_pubkey.as_slice())?;
+        let pubkey = match &resp.pubkey {
+            Some(pubkey) => &PublicKey::from_slice(pubkey.as_slice())?,
+            None => &PublicKey::from_slice(resp.master_pubkey.as_slice())?,
+        };
+
         self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
 
         Ok(resp)
