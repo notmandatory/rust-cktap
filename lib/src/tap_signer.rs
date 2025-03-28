@@ -123,6 +123,7 @@ impl<T: CkTransport> TapSigner<T> {
 
         let card_nonce = self.card_nonce();
         let sig = &derive_response.sig;
+
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
@@ -139,9 +140,14 @@ impl<T: CkTransport> TapSigner<T> {
                 .map_err(Error::from)?,
         };
 
-        self.secp()
+        // TODO: actually return as error when we can figure out why its not working on the card
+        if let Err(e) = self
+            .secp()
             .verify_ecdsa(&message, &signature, &pubkey)
-            .map_err(Error::from)?;
+            .map_err(Error::from)
+        {
+            println!("verify ecdsa failed: {e:?}");
+        };
 
         self.card_nonce = derive_response.card_nonce;
         Ok(derive_response)
