@@ -583,7 +583,7 @@ pub struct SignCommand {
     subpath: Option<[u32; 2]>,
     // additional keypath for TapSigner only
     #[serde(with = "serde_bytes")]
-    digest: Vec<u8>,
+    digest: [u8; 32],
     // message digest to be signed
     #[serde(with = "serde_bytes")]
     epubkey: [u8; 33],
@@ -605,7 +605,7 @@ impl SignCommand {
 
     pub fn for_tapsigner(
         subpath: Option<[u32; 2]>,
-        digest: Vec<u8>,
+        digest: [u8; 32],
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
@@ -635,9 +635,9 @@ pub struct SignResponse {
     /// command result
     pub slot: u8,
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>,
+    pub sig: [u8; 64],
     #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
+    pub pubkey: [u8; 33],
     #[serde(with = "serde_bytes")]
     pub card_nonce: [u8; 16],
 }
