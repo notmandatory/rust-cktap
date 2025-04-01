@@ -580,7 +580,9 @@ impl ResponseApdu for NfcResponse {}
 pub struct SignCommand {
     cmd: &'static str,
     slot: Option<u8>,
-    subpath: Option<[u32; 2]>,
+    // 0,1 or 2 length
+    #[serde(rename = "subpath")]
+    sub_path: Vec<u32>,
     // additional keypath for TapSigner only
     #[serde(with = "serde_bytes")]
     digest: [u8; 32],
@@ -604,7 +606,7 @@ impl SignCommand {
     // }
 
     pub fn for_tapsigner(
-        subpath: Option<[u32; 2]>,
+        sub_path: Vec<u32>,
         digest: [u8; 32],
         epubkey: PublicKey,
         xcvc: Vec<u8>,
@@ -612,7 +614,7 @@ impl SignCommand {
         SignCommand {
             cmd: Self::name(),
             slot: Some(0),
-            subpath,
+            sub_path,
             digest,
             epubkey: epubkey.serialize(),
             xcvc,

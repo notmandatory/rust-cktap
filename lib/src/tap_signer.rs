@@ -144,7 +144,12 @@ impl<T: CkTransport> TapSigner<T> {
     }
 
     /// Sign a message digest with the tap signer
-    pub async fn sign(&mut self, digest: [u8; 32], cvc: &str) -> Result<SignResponse, Error> {
+    pub async fn sign(
+        &mut self,
+        digest: [u8; 32],
+        subpath: Vec<u32>,
+        cvc: &str,
+    ) -> Result<SignResponse, Error> {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, SignCommand::name());
 
         // Use the same session key to encrypt the new CVC
@@ -159,9 +164,8 @@ impl<T: CkTransport> TapSigner<T> {
             .collect();
 
         let xdigest: [u8; 32] = xdigest_vec.try_into().expect("input is also 32 bytes");
-        let sign_command = SignCommand::for_tapsigner(None, xdigest, epubkey, xcvc);
+        let sign_command = SignCommand::for_tapsigner(subpath, xdigest, epubkey, xcvc);
         let sign_response: SignResponse = self.transport.transmit(&sign_command).await?;
-
         self.card_nonce = sign_response.card_nonce;
         Ok(sign_response)
     }
@@ -212,7 +216,7 @@ impl<T: CkTransport> TapSigner<T> {
             let digest = sighash.to_byte_array();
 
             // Send digest to TAPSIGNER for signing
-            let sign_response = self.sign(digest, cvc).await?;
+            let sign_response = self.sign(digest, vec![0, 0], cvc).await?;
             let signature = sign_response.sig;
 
             // Get the public key from TAPSIGNER or from the PSBT

@@ -143,7 +143,7 @@ async fn main() -> Result<(), Error> {
                         rust_cktap::secp256k1::hashes::sha256::Hash::hash(to_sign.as_bytes())
                             .to_byte_array();
 
-                    let response = &ts.sign(digest, &cvc()).await;
+                    let response = &ts.sign(digest, vec![], &cvc()).await;
                     println!("{:?}", response);
                 }
             }
