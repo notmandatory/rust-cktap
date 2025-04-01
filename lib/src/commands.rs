@@ -39,7 +39,7 @@ pub trait Authentication<T: CkTransport> {
         let mask: Vec<u8> = session_key
             .as_ref()
             .iter()
-            .zip(md.as_ref())
+            .zip(md)
             .map(|(x, y)| x ^ y)
             .take(cvc_bytes.len())
             .collect();
