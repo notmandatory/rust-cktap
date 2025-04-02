@@ -46,7 +46,6 @@ pub enum CvcChangeError {
     SameAsOld,
 }
 
-#[cfg(feature = "bitcoin")]
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PsbtSignError {
     #[error("Missing UTXO")]
@@ -170,7 +169,6 @@ impl<T: CkTransport> TapSigner<T> {
         Ok(sign_response)
     }
 
-    #[cfg(feature = "bitcoin")]
     pub async fn sign_bip84_psbt(
         &mut self,
         mut psbt: bitcoin::Psbt,

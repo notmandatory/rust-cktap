@@ -20,16 +20,20 @@ tokio = { version = "1.44", features = ["macros"] }
 # error handling
 thiserror = "2.0"
 
-# optional dependencies
+# bitcoin
+bitcoin = { version = "0.32" }
+
+# logging
+log = "0.4"
+
 pcsc = { version = "2", optional = true }
 uniffi = { version = "=0.29.0", features = ["cli"] }
-bitcoin = { version = "0.32", optional = true }
 
 [build-dependencies]
 uniffi = { version = "=0.29.0", features = ["build"] }
 
 [features]
-default = ["bitcoin"]
+default = []
 emulator = []
 
 [[example]]
