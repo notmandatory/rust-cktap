@@ -1,19 +1,18 @@
-pub mod tap_signer;
-
 /// An Application Protocol Data Unit (APDU) is the unit of communication between a smart card
 /// reader and a smart card. This file defines the Coinkite APDU and set of command/responses.
+pub mod tap_signer;
+
+use bitcoin::secp256k1::{
+    self, ecdh::SharedSecret, ecdsa::Signature, hashes::hex::DisplayHex, PublicKey, SecretKey,
+    XOnlyPublicKey,
+};
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
-use secp256k1::ecdh::SharedSecret;
-use secp256k1::ecdsa::Signature;
-use secp256k1::hashes::hex::DisplayHex;
-use secp256k1::{PublicKey, SecretKey, XOnlyPublicKey};
 use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];

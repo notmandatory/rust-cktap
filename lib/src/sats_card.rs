@@ -1,4 +1,4 @@
-use secp256k1::{
+use bitcoin::secp256k1::{
     ecdsa::Signature,
     hashes::{sha256, Hash as _},
     All, Message, PublicKey, Secp256k1,

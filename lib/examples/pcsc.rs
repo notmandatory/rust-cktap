@@ -4,7 +4,7 @@ use rust_cktap::apdu::Error;
 use rust_cktap::commands::{Certificate, Wait};
 use rust_cktap::{pcsc, rand_chaincode, CkTapCard};
 
-use secp256k1::rand;
+use bitcoin::secp256k1::rand;
 use std::io;
 use std::io::Write;
 
