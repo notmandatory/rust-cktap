@@ -72,6 +72,9 @@ pub enum PsbtSignError {
 
     #[error("pubkey mismatch: index: {0}")]
     PubkeyMismatch(usize),
+
+    #[error("Invalid path at index: {0}")]
+    InvalidPath(usize),
 }
 
 impl<T: CkTransport> Authentication<T> for TapSigner<T> {
@@ -234,8 +237,16 @@ impl<T: CkTransport> TapSigner<T> {
                 .next()
                 .ok_or(Error::MissingPubkey(input_index))?;
 
-            let sub_path = path.to_u32_vec();
-            println!("aaa_sub_path: {sub_path:#?}");
+            const HARDENED: u32 = 0x80000000;
+            let path = path.to_u32_vec();
+            let sub_path = vec![
+                *path.get(3).ok_or(Error::InvalidPath(input_index))?,
+                *path.get(4).ok_or(Error::InvalidPath(input_index))?,
+            ];
+
+            if sub_path.iter().any(|p| *p > HARDENED) {
+                return Err(Error::InvalidPath(input_index));
+            }
 
             // Calculate sighash
             let script = script_pubkey.as_script();
@@ -247,7 +258,7 @@ impl<T: CkTransport> TapSigner<T> {
             let digest: &[u8; 32] = sighash.as_ref();
 
             // Send digest to TAPSIGNER for signing
-            let sign_response = self.sign(*digest, vec![0, 0], cvc).await?;
+            let sign_response = self.sign(*digest, sub_path, cvc).await?;
             let signature_raw = sign_response.sig;
 
             let expected_pubkey_bytes = expected_pubkey.serialize();
@@ -266,6 +277,8 @@ impl<T: CkTransport> TapSigner<T> {
                 .partial_sigs
                 .insert((*expected_pubkey).into(), final_sig);
         }
+
+        let psbt = crate::psbt::finalize_psbt(psbt)?;
 
         Ok(psbt)
     }
