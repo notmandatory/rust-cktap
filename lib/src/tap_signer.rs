@@ -63,8 +63,11 @@ pub enum PsbtSignError {
     #[error("Sighash error: {0}")]
     SighashError(String),
 
-    #[error("Invalid script: {0}")]
-    InvalidScript(usize),
+    #[error("Invalid script: index: {input_index}, reason: {reason:?}")]
+    InvalidScript {
+        input_index: usize,
+        reason: &'static str,
+    },
 
     #[error(transparent)]
     TapSignerError(#[from] Error),
@@ -199,6 +202,12 @@ impl<T: CkTransport> TapSigner<T> {
 
             // Extract the P2WPKH script from PSBT
             let script_buf = &witness_utxo.script_pubkey;
+            if !script_buf.is_p2wpkh() {
+                return Err(Error::InvalidScript {
+                    input_index,
+                    reason: "not p2wpkh",
+                });
+            }
 
             // Calculate sighash with the correct P2PKH script
             let sighash = sighash_cache
@@ -239,6 +248,7 @@ impl<T: CkTransport> TapSigner<T> {
 
         Ok(psbt)
     }
+
     /// Derive a public key at the given hardened path
     pub async fn derive(
         &mut self,
