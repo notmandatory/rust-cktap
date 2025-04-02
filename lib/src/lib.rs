@@ -8,6 +8,7 @@ use commands::CkTransport;
 pub mod apdu;
 pub mod commands;
 pub mod factory_root_key;
+pub mod psbt;
 
 pub use bitcoin::secp256k1::{self, rand};
 

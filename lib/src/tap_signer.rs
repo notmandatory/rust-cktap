@@ -64,11 +64,8 @@ pub enum PsbtSignError {
     #[error("Sighash error: {0}")]
     SighashError(String),
 
-    #[error("Invalid script: index: {input_index}, reason: {reason:?}")]
-    InvalidScript {
-        input_index: usize,
-        reason: &'static str,
-    },
+    #[error("Invalid script: index: {0}")]
+    InvalidScript(usize),
 
     #[error(transparent)]
     TapSignerError(#[from] Error),
@@ -227,11 +224,18 @@ impl<T: CkTransport> TapSigner<T> {
             // Extract the P2WPKH script from PSBT
             let script_pubkey = &witness_utxo.script_pubkey;
             if !script_pubkey.is_p2wpkh() {
-                return Err(Error::InvalidScript {
-                    input_index,
-                    reason: "not p2wpkh",
-                });
+                return Err(Error::InvalidScript(input_index));
             }
+
+            // Get the public key from TAPSIGNER or from the PSBT
+            let key_pairs = &input.bip32_derivation;
+            let (expected_pubkey, (_fingerprint, path)) = key_pairs
+                .iter()
+                .next()
+                .ok_or(Error::MissingPubkey(input_index))?;
+
+            let sub_path = path.to_u32_vec();
+            println!("aaa_sub_path: {sub_path:#?}");
 
             // Calculate sighash
             let script = script_pubkey.as_script();
@@ -246,30 +250,21 @@ impl<T: CkTransport> TapSigner<T> {
             let sign_response = self.sign(*digest, vec![0, 0], cvc).await?;
             let signature_raw = sign_response.sig;
 
-            // Get the public key from TAPSIGNER or from the PSBT
-            let key_pairs = &input.bip32_derivation;
-            let expected_pubkey = key_pairs
-                .iter()
-                .next()
-                .map(|(pubkey, _)| *pubkey)
-                .ok_or(Error::MissingPubkey(input_index))?;
-
-            let expected_pubkey: PublicKey = expected_pubkey.into();
             let expected_pubkey_bytes = expected_pubkey.serialize();
 
-            // 6. Verify that TapSigner used the expected public key.
+            // verify that TapSigner used the expected public key.
             if &sign_response.pubkey != &expected_pubkey_bytes {
                 return Err(Error::PubkeyMismatch(input_index));
             }
-
-            println!("PUBKEY_MATCHES");
 
             // Update the PSBT input with the signature
             let ecdsa_sig = ecdsa::Signature::from_compact(signature_raw.as_slice())
                 .map_err(|e| Error::SignatureError(e.to_string()))?;
 
             let final_sig = bitcoin::ecdsa::Signature::sighash_all(ecdsa_sig);
-            input.partial_sigs.insert(expected_pubkey.into(), final_sig);
+            input
+                .partial_sigs
+                .insert((*expected_pubkey).into(), final_sig);
         }
 
         Ok(psbt)

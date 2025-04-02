@@ -11,13 +11,13 @@ pub fn finalize_psbt(mut psbt: Psbt) -> Result<Psbt, PsbtSignError> {
         }
         // For P2WPKH, we expect exactly one signature; so if there's no partial signature, error.
         if input.partial_sigs.is_empty() {
-            let msg = format!("Input {} has no partial signatures", idx);
+            let msg = format!("input {} has no partial signatures", idx);
             return Err(PsbtSignError::SignatureError(msg));
         }
         // For P2WPKH we expect one signature; if more than one exists, choose the first.
         // The key is a bitcoin::PublicKey.
         let (&ref pubkey, sig) = input.partial_sigs.iter().next().ok_or_else(|| {
-            let msg = format!("Input {}: expected at least one signature", idx);
+            let msg = format!("input {}: expected at least one signature", idx);
             PsbtSignError::SignatureError(msg)
         })?;
 

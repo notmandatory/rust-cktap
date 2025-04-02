@@ -392,20 +392,20 @@ impl DeriveCommand {
 #[derive(Deserialize, Clone)]
 pub struct DeriveResponse {
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>, // 64 bytes
+    pub sig: [u8; 64],
     /// chain code of derived subkey
     #[serde(with = "serde_bytes")]
-    pub chain_code: Vec<u8>, // 32 bytes
+    pub chain_code: [u8; 32],
     /// master public key in effect (`m`)
     #[serde(with = "serde_bytes")]
-    pub master_pubkey: Vec<u8>, // 33 bytes
+    pub master_pubkey: [u8; 33],
     /// derived public key for indicated path
     #[serde(with = "serde_bytes")]
     #[serde(default = "Option::default")]
-    pub pubkey: Option<Vec<u8>>, // 33 bytes
+    pub pubkey: Option<[u8; 33]>, //
     /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: [u8; 16], // 16 bytes
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for DeriveResponse {}
