@@ -149,7 +149,7 @@ impl<T: CkTransport> TapSigner<T> {
     pub async fn sign(
         &mut self,
         digest: [u8; 32],
-        subpath: Vec<u32>,
+        sub_path: Vec<u32>,
         cvc: &str,
     ) -> Result<SignResponse, Error> {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, SignCommand::name());
@@ -166,12 +166,30 @@ impl<T: CkTransport> TapSigner<T> {
             .collect();
 
         let xdigest: [u8; 32] = xdigest_vec.try_into().expect("input is also 32 bytes");
-        let sign_command = SignCommand::for_tapsigner(subpath, xdigest, epubkey, xcvc);
-        let sign_response: SignResponse = self.transport.transmit(&sign_command).await?;
+        let sign_command =
+            SignCommand::for_tapsigner(sub_path.clone(), xdigest, epubkey, xcvc.clone());
+        let mut sign_response: Result<SignResponse, Error> =
+            self.transport.transmit(&sign_command).await;
+
+        let mut unlucky_number_retries = 0;
+        while let Err(Error::CkTap(crate::apdu::CkTapError::UnluckyNumber)) = sign_response {
+            let sign_command =
+                SignCommand::for_tapsigner(sub_path.clone(), xdigest, epubkey, xcvc.clone());
+
+            sign_response = self.transport.transmit(&sign_command).await;
+            unlucky_number_retries += 1;
+
+            if unlucky_number_retries > 3 {
+                break;
+            }
+        }
+
+        let sign_response = sign_response?;
         self.card_nonce = sign_response.card_nonce;
         Ok(sign_response)
     }
 
+    /// Sign a BIP84 (P2WPKH) PSBT
     pub async fn sign_bip84_psbt(
         &mut self,
         mut psbt: bitcoin::Psbt,
