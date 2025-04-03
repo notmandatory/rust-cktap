@@ -264,7 +264,8 @@ impl<T: CkTransport> TapSigner<T> {
 
             // verify that TAPSIGNER used the same public key as the PSBT
             if sign_response.pubkey != psbt_pubkey.serialize() {
-                // try deriving the TAPSIGNER and try again
+                // try deriving the TAPSIGNER and try again,
+                // take the hardened path and remove the the hardened bit, because `sign` hardens it
                 let path: Vec<u32> = path.into_iter().map(|p| p ^ (1 << 31)).take(3).collect();
                 let derive_response = self.derive(&path, cvc).await;
                 if derive_response.is_err() {
