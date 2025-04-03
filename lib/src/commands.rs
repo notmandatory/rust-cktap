@@ -2,10 +2,11 @@ use crate::factory_root_key::FactoryRootKey;
 use crate::{apdu::*, rand_nonce};
 use crate::{CkTapCard, SatsCard, TapSigner};
 
-use secp256k1::ecdh::SharedSecret;
-use secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
-use secp256k1::hashes::{sha256, Hash};
-use secp256k1::{rand, All, Message, PublicKey, Secp256k1, SecretKey};
+use bitcoin::key::rand;
+use bitcoin::secp256k1::ecdh::SharedSecret;
+use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
+use bitcoin::secp256k1::hashes::{sha256, Hash};
+use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, SecretKey};
 
 use std::convert::TryFrom;
 
@@ -39,7 +40,7 @@ pub trait Authentication<T: CkTransport> {
         let mask: Vec<u8> = session_key
             .as_ref()
             .iter()
-            .zip(md.as_ref())
+            .zip(md)
             .map(|(x, y)| x ^ y)
             .take(cvc_bytes.len())
             .collect();
@@ -206,7 +207,7 @@ where
                     _ => panic!("Unrecognized BIP-137 address"),
                 };
 
-                let rec_id = RecoveryId::try_from((sig[0] as i32) - subtract_by)?;
+                let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by)?;
                 let (_, sig) = sig.split_at(1);
                 let rec_sig = RecoverableSignature::from_compact(sig, rec_id)?;
 

@@ -1,19 +1,18 @@
-pub mod tap_signer;
-
 /// An Application Protocol Data Unit (APDU) is the unit of communication between a smart card
 /// reader and a smart card. This file defines the Coinkite APDU and set of command/responses.
+pub mod tap_signer;
+
+use bitcoin::secp256k1::{
+    self, ecdh::SharedSecret, ecdsa::Signature, hashes::hex::DisplayHex, PublicKey, SecretKey,
+    XOnlyPublicKey,
+};
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
-use secp256k1::ecdh::SharedSecret;
-use secp256k1::ecdsa::Signature;
-use secp256k1::hashes::hex::DisplayHex;
-use secp256k1::{PublicKey, SecretKey, XOnlyPublicKey};
 use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
@@ -393,20 +392,20 @@ impl DeriveCommand {
 #[derive(Deserialize, Clone)]
 pub struct DeriveResponse {
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>, // 64 bytes
+    pub sig: [u8; 64],
     /// chain code of derived subkey
     #[serde(with = "serde_bytes")]
-    pub chain_code: Vec<u8>, // 32 bytes
+    pub chain_code: [u8; 32],
     /// master public key in effect (`m`)
     #[serde(with = "serde_bytes")]
-    pub master_pubkey: Vec<u8>, // 33 bytes
+    pub master_pubkey: [u8; 33],
     /// derived public key for indicated path
     #[serde(with = "serde_bytes")]
     #[serde(default = "Option::default")]
-    pub pubkey: Option<Vec<u8>>, // 33 bytes
+    pub pubkey: Option<[u8; 33]>, //
     /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: [u8; 16], // 16 bytes
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for DeriveResponse {}
@@ -417,10 +416,7 @@ impl Debug for DeriveResponse {
             .field("sig", &self.sig.to_lower_hex_string())
             .field("chain_code", &self.chain_code.to_lower_hex_string())
             .field("master_pubkey", &self.master_pubkey.to_lower_hex_string())
-            .field(
-                "pubkey",
-                &self.pubkey.clone().map(|pk| pk.to_lower_hex_string()),
-            )
+            .field("pubkey", &self.pubkey.map(|pk| pk.to_lower_hex_string()))
             .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
@@ -580,10 +576,12 @@ impl ResponseApdu for NfcResponse {}
 pub struct SignCommand {
     cmd: &'static str,
     slot: Option<u8>,
-    subpath: Option<[u32; 2]>,
+    // 0,1 or 2 length
+    #[serde(rename = "subpath")]
+    sub_path: Vec<u32>,
     // additional keypath for TapSigner only
     #[serde(with = "serde_bytes")]
-    digest: Vec<u8>,
+    digest: [u8; 32],
     // message digest to be signed
     #[serde(with = "serde_bytes")]
     epubkey: [u8; 33],
@@ -604,15 +602,15 @@ impl SignCommand {
     // }
 
     pub fn for_tapsigner(
-        subpath: Option<[u32; 2]>,
-        digest: Vec<u8>,
+        sub_path: Vec<u32>,
+        digest: [u8; 32],
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         SignCommand {
             cmd: Self::name(),
             slot: Some(0),
-            subpath,
+            sub_path,
             digest,
             epubkey: epubkey.serialize(),
             xcvc,
@@ -635,9 +633,9 @@ pub struct SignResponse {
     /// command result
     pub slot: u8,
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>,
+    pub sig: [u8; 64],
     #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
+    pub pubkey: [u8; 33],
     #[serde(with = "serde_bytes")]
     pub card_nonce: [u8; 16],
 }

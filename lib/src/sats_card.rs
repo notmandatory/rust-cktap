@@ -1,4 +1,4 @@
-use secp256k1::{
+use bitcoin::secp256k1::{
     ecdsa::Signature,
     hashes::{sha256, Hash as _},
     All, Message, PublicKey, Secp256k1,
@@ -104,14 +104,14 @@ impl<T: CkTransport> SatsCard<T> {
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
         message_bytes.extend(nonce);
-        message_bytes.extend(resp.chain_code.clone());
+        message_bytes.extend(resp.chain_code);
 
         let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
         let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
-        let signature = Signature::from_compact(resp.sig.as_slice())?;
+        let signature = Signature::from_compact(&resp.sig)?;
 
-        let pubkey = PublicKey::from_slice(resp.master_pubkey.as_slice())?;
+        let pubkey = PublicKey::from_slice(&resp.master_pubkey)?;
         self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
 
         Ok(resp)

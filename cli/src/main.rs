@@ -6,6 +6,7 @@ use rust_cktap::commands::{CkTransport, Read};
 use rust_cktap::emulator;
 #[cfg(not(feature = "emulator"))]
 use rust_cktap::pcsc;
+use rust_cktap::secp256k1::hashes::Hash as _;
 use rust_cktap::secp256k1::rand;
 use rust_cktap::{apdu::Error, commands::Certificate, rand_chaincode, CkTapCard};
 use std::io;
@@ -69,6 +70,8 @@ enum TapSignerCommand {
     Backup,
     /// Change the PIN (CVC) used for card authentication to a new user provided one
     Change { new_cvc: String },
+    /// Sign a digest
+    Sign { to_sign: String },
 }
 
 #[tokio::main]
@@ -133,6 +136,14 @@ async fn main() -> Result<(), Error> {
 
                 TapSignerCommand::Change { new_cvc } => {
                     let response = &ts.change(&new_cvc, &cvc()).await;
+                    println!("{:?}", response);
+                }
+                TapSignerCommand::Sign { to_sign } => {
+                    let digest: [u8; 32] =
+                        rust_cktap::secp256k1::hashes::sha256::Hash::hash(to_sign.as_bytes())
+                            .to_byte_array();
+
+                    let response = &ts.sign(digest, vec![], &cvc()).await;
                     println!("{:?}", response);
                 }
             }

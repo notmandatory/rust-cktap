@@ -1,14 +1,15 @@
 uniffi::setup_scaffolding!();
 
 extern crate core;
-pub extern crate secp256k1;
 
+use bitcoin::key::rand::Rng as _;
 use commands::CkTransport;
-use secp256k1::rand::{self, rngs::ThreadRng, Rng};
 
 pub mod apdu;
 pub mod commands;
 pub mod factory_root_key;
+
+pub use bitcoin::secp256k1::{self, rand};
 
 #[cfg(feature = "emulator")]
 pub mod emulator;
@@ -48,7 +49,7 @@ impl<T: CkTransport> core::fmt::Debug for CkTapCard<T> {
 
 // utility functions
 
-pub fn rand_chaincode(rng: &mut ThreadRng) -> [u8; 32] {
+pub fn rand_chaincode(rng: &mut rand::rngs::ThreadRng) -> [u8; 32] {
     let mut chain_code = [0u8; 32];
     rng.fill(&mut chain_code);
     chain_code
