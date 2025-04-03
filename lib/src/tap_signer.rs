@@ -210,13 +210,9 @@ impl<T: CkTransport> TapSigner<T> {
 
         type Error = PsbtSignError;
 
-        // 1. Extract the unsigned transaction
         let unsigned_tx = psbt.unsigned_tx.clone();
-
-        // 2. Create sighash cache
         let mut sighash_cache = SighashCache::new(&unsigned_tx);
 
-        // 3. Process each input
         for (input_index, input) in psbt.inputs.iter_mut().enumerate() {
             // Extract previous output data from the PSBT
             let witness_utxo = input
@@ -266,12 +262,12 @@ impl<T: CkTransport> TapSigner<T> {
             let expected_pubkey_bytes = expected_pubkey.serialize();
 
             // verify that TapSigner used the expected public key.
-            if &sign_response.pubkey != &expected_pubkey_bytes {
+            if sign_response.pubkey != expected_pubkey_bytes {
                 return Err(Error::PubkeyMismatch(input_index));
             }
 
             // Update the PSBT input with the signature
-            let ecdsa_sig = ecdsa::Signature::from_compact(signature_raw.as_slice())
+            let ecdsa_sig = ecdsa::Signature::from_compact(&signature_raw)
                 .map_err(|e| Error::SignatureError(e.to_string()))?;
 
             let final_sig = bitcoin::ecdsa::Signature::sighash_all(ecdsa_sig);
@@ -279,8 +275,6 @@ impl<T: CkTransport> TapSigner<T> {
                 .partial_sigs
                 .insert((*expected_pubkey).into(), final_sig);
         }
-
-        let psbt = crate::psbt::finalize_psbt(psbt)?;
 
         Ok(psbt)
     }
@@ -310,11 +304,10 @@ impl<T: CkTransport> TapSigner<T> {
         let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
         let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
-        let signature = Signature::from_compact(sig.as_slice()).map_err(Error::from)?;
+        let signature = Signature::from_compact(sig).map_err(Error::from)?;
         let pubkey = match &derive_response.pubkey {
-            Some(pubkey) => PublicKey::from_slice(pubkey.as_slice()).map_err(Error::from)?,
-            None => PublicKey::from_slice(derive_response.master_pubkey.as_slice())
-                .map_err(Error::from)?,
+            Some(pubkey) => PublicKey::from_slice(pubkey).map_err(Error::from)?,
+            None => PublicKey::from_slice(&derive_response.master_pubkey).map_err(Error::from)?,
         };
 
         // TODO: actually return as error when we can figure out why its not working on the card

@@ -416,10 +416,7 @@ impl Debug for DeriveResponse {
             .field("sig", &self.sig.to_lower_hex_string())
             .field("chain_code", &self.chain_code.to_lower_hex_string())
             .field("master_pubkey", &self.master_pubkey.to_lower_hex_string())
-            .field(
-                "pubkey",
-                &self.pubkey.clone().map(|pk| pk.to_lower_hex_string()),
-            )
+            .field("pubkey", &self.pubkey.map(|pk| pk.to_lower_hex_string()))
             .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
