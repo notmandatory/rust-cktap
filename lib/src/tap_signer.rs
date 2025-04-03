@@ -4,6 +4,7 @@ use bitcoin::secp256k1::{
     hashes::{sha256, Hash as _},
     All, Message, PublicKey, Secp256k1,
 };
+use log::error;
 
 use crate::apdu::{
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
@@ -214,7 +215,7 @@ impl<T: CkTransport> TapSigner<T> {
         let mut sighash_cache = SighashCache::new(&unsigned_tx);
 
         for (input_index, input) in psbt.inputs.iter_mut().enumerate() {
-            // Extract previous output data from the PSBT
+            // extract previous output data from the PSBT
             let witness_utxo = input
                 .witness_utxo
                 .as_ref()
@@ -222,15 +223,15 @@ impl<T: CkTransport> TapSigner<T> {
 
             let amount = witness_utxo.value;
 
-            // Extract the P2WPKH script from PSBT
+            // extract the P2WPKH script from PSBT
             let script_pubkey = &witness_utxo.script_pubkey;
             if !script_pubkey.is_p2wpkh() {
                 return Err(Error::InvalidScript(input_index));
             }
 
-            // Get the public key from TAPSIGNER or from the PSBT
+            // get the public key from the PSBT
             let key_pairs = &input.bip32_derivation;
-            let (expected_pubkey, (_fingerprint, path)) = key_pairs
+            let (psbt_pubkey, (_fingerprint, path)) = key_pairs
                 .iter()
                 .next()
                 .ok_or(Error::MissingPubkey(input_index))?;
@@ -246,34 +247,30 @@ impl<T: CkTransport> TapSigner<T> {
                 return Err(Error::InvalidPath(input_index));
             }
 
-            // Calculate sighash
+            // calculate sighash
             let script = script_pubkey.as_script();
             let sighash = sighash_cache
                 .p2wpkh_signature_hash(input_index, script, amount, EcdsaSighashType::All)
                 .map_err(|e| Error::SighashError(e.to_string()))?;
 
-            // Get the digest to sign
+            // the digest is the sighash
             let digest: &[u8; 32] = sighash.as_ref();
 
-            // Send digest to TAPSIGNER for signing
+            // send digest to TAPSIGNER for signing
             let sign_response = self.sign(*digest, sub_path, cvc).await?;
             let signature_raw = sign_response.sig;
 
-            let expected_pubkey_bytes = expected_pubkey.serialize();
-
-            // verify that TapSigner used the expected public key.
-            if sign_response.pubkey != expected_pubkey_bytes {
+            // verify that TAPSIGNER used the same public key as the PSBT
+            if sign_response.pubkey != psbt_pubkey.serialize() {
                 return Err(Error::PubkeyMismatch(input_index));
             }
 
-            // Update the PSBT input with the signature
+            // update the PSBT input with the signature
             let ecdsa_sig = ecdsa::Signature::from_compact(&signature_raw)
                 .map_err(|e| Error::SignatureError(e.to_string()))?;
 
             let final_sig = bitcoin::ecdsa::Signature::sighash_all(ecdsa_sig);
-            input
-                .partial_sigs
-                .insert((*expected_pubkey).into(), final_sig);
+            input.partial_sigs.insert((*psbt_pubkey).into(), final_sig);
         }
 
         Ok(psbt)
@@ -317,7 +314,7 @@ impl<T: CkTransport> TapSigner<T> {
             .map_err(Error::from)
             .is_err()
         {
-            println!("verify derive command ecdsa signature failed");
+            error!("verify derive command ecdsa signature failed");
         };
 
         self.card_nonce = derive_response.card_nonce;
