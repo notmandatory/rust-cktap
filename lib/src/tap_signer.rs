@@ -195,8 +195,10 @@ impl<T: CkTransport> TapSigner<T> {
         Ok(sign_response)
     }
 
-    /// Sign a BIP84 (P2WPKH) PSBT
-    pub async fn sign_bip84_psbt(
+    /// Sign a BIP84, currently only P2WPKH (BIP84) (Native SegWit) PSBT
+    /// This function will return a signed but not finalized PSBT. You will need to finalize the
+    /// PSBT yourself before it can be broadcasted.
+    pub async fn sign_psbt(
         &mut self,
         mut psbt: bitcoin::Psbt,
         cvc: &str,
