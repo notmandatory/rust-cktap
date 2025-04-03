@@ -236,13 +236,15 @@ impl<T: CkTransport> TapSigner<T> {
                 .next()
                 .ok_or(Error::MissingPubkey(input_index))?;
 
+            // 1 << 31
             const HARDENED: u32 = 0x80000000;
             let path = path.to_u32_vec();
-            let sub_path = vec![
-                *path.get(3).ok_or(Error::InvalidPath(input_index))?,
-                *path.get(4).ok_or(Error::InvalidPath(input_index))?,
-            ];
 
+            if path.len() != 5 {
+                return Err(Error::InvalidPath(input_index));
+            }
+
+            let sub_path = vec![path[3], path[4]];
             if sub_path.iter().any(|p| *p > HARDENED) {
                 return Err(Error::InvalidPath(input_index));
             }
@@ -263,6 +265,7 @@ impl<T: CkTransport> TapSigner<T> {
             // verify that TAPSIGNER used the same public key as the PSBT
             if sign_response.pubkey != psbt_pubkey.serialize() {
                 // try deriving the TAPSIGNER and try again
+                let path: Vec<u32> = path.into_iter().map(|p| p ^ (1 << 31)).take(3).collect();
                 let derive_response = self.derive(&path, cvc).await;
                 if derive_response.is_err() {
                     return Err(Error::PubkeyMismatch(input_index));
