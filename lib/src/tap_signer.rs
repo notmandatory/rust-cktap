@@ -257,12 +257,25 @@ impl<T: CkTransport> TapSigner<T> {
             let digest: &[u8; 32] = sighash.as_ref();
 
             // send digest to TAPSIGNER for signing
-            let sign_response = self.sign(*digest, sub_path, cvc).await?;
-            let signature_raw = sign_response.sig;
+            let mut sign_response = self.sign(*digest, sub_path.clone(), cvc).await?;
+            let mut signature_raw = sign_response.sig;
 
             // verify that TAPSIGNER used the same public key as the PSBT
             if sign_response.pubkey != psbt_pubkey.serialize() {
-                return Err(Error::PubkeyMismatch(input_index));
+                // try deriving the TAPSIGNER and try again
+                let derive_response = self.derive(&path, cvc).await;
+                if derive_response.is_err() {
+                    return Err(Error::PubkeyMismatch(input_index));
+                }
+
+                // update signature to the new one we just derived
+                sign_response = self.sign(*digest, sub_path, cvc).await?;
+                signature_raw = sign_response.sig;
+
+                // if still not matching, return error
+                if sign_response.pubkey != psbt_pubkey.serialize() {
+                    return Err(Error::PubkeyMismatch(input_index));
+                }
             }
 
             // update the PSBT input with the signature
