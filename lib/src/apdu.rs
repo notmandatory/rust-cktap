@@ -1,40 +1,104 @@
 /// An Application Protocol Data Unit (APDU) is the unit of communication between a smart card
 /// reader and a smart card. This file defines the Coinkite APDU and set of command/responses.
+pub mod tap_signer;
+
+use bitcoin::secp256k1::{
+    self, ecdh::SharedSecret, ecdsa::Signature, hashes::hex::DisplayHex, PublicKey, SecretKey,
+    XOnlyPublicKey,
+};
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
-use secp256k1::ecdh::SharedSecret;
-use secp256k1::ecdsa::Signature;
-use secp256k1::hashes::hex::ToHex;
-use secp256k1::{PublicKey, SecretKey, XOnlyPublicKey};
 use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-
 pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
 
-// require nonce sizes (bytes)
-pub const CARD_NONCE_SIZE: usize = 16;
-pub const USER_NONCE_SIZE: usize = 16;
-
 // Errors
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
+    #[error("CiborDe: {0}")]
     CiborDe(String),
+    #[error("CiborValue: {0}")]
     CiborValue(String),
-    CkTap {
-        error: String,
-        code: usize,
-    },
+    #[error("CkTap: {0:?}")]
+    CkTap(CkTapError),
+    #[error("IncorrectSignature: {0}")]
     IncorrectSignature(String),
+    #[error("UnknownCardType: {0}")]
     UnknownCardType(String),
+
     #[cfg(feature = "pcsc")]
+    #[error("PcSc: {0}")]
     PcSc(String),
+
     #[cfg(feature = "emulator")]
+    #[error("Emulator: {0}")]
     Emulator(String),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CkTapError {
+    #[error("Rare or unlucky value used/occurred. Start again")]
+    UnluckyNumber,
+    #[error("Invalid/incorrect/incomplete arguments provided to command")]
+    BadArguments,
+    #[error("Authentication details (CVC/epubkey) are wrong")]
+    BadAuth,
+    #[error("Command requires auth, and none was provided")]
+    NeedsAuth,
+    #[error("The 'cmd' field is an unsupported command")]
+    UnknownCommand,
+    #[error("Command is not valid at this time, no point retrying")]
+    InvalidCommand,
+    #[error("You can't do that right now when card is in this state")]
+    InvalidState,
+    #[error("Nonce is not unique-looking enough")]
+    WeakNonce,
+    #[error("Unable to decode CBOR data stream")]
+    BadCBOR,
+    #[error("Can't change CVC without doing a backup first")]
+    BackupFirst,
+    #[error("Due to auth failures, delay required")]
+    RateLimited,
+}
+
+impl CkTapError {
+    pub fn error_from_code(code: u16) -> Option<CkTapError> {
+        match code {
+            205 => Some(CkTapError::UnluckyNumber),
+            400 => Some(CkTapError::BadArguments),
+            401 => Some(CkTapError::BadAuth),
+            403 => Some(CkTapError::NeedsAuth),
+            404 => Some(CkTapError::UnknownCommand),
+            405 => Some(CkTapError::InvalidCommand),
+            406 => Some(CkTapError::InvalidState),
+            417 => Some(CkTapError::WeakNonce),
+            422 => Some(CkTapError::BadCBOR),
+            425 => Some(CkTapError::BackupFirst),
+            429 => Some(CkTapError::RateLimited),
+            _ => None,
+        }
+    }
+
+    pub fn error_code(&self) -> u16 {
+        match self {
+            CkTapError::UnluckyNumber => 205,
+            CkTapError::BadArguments => 400,
+            CkTapError::BadAuth => 401,
+            CkTapError::NeedsAuth => 403,
+            CkTapError::UnknownCommand => 404,
+            CkTapError::InvalidCommand => 405,
+            CkTapError::InvalidState => 406,
+            CkTapError::WeakNonce => 417,
+            CkTapError::BadCBOR => 422,
+            CkTapError::BackupFirst => 425,
+            CkTapError::RateLimited => 429,
+        }
+    }
 }
 
 impl<T> From<ciborium::de::Error<T>> for Error
@@ -68,12 +132,12 @@ impl From<pcsc::Error> for Error {
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ErrorResponse {
     pub error: String,
-    pub code: usize,
+    pub code: u16,
 }
 
 // Apdu Traits
 pub trait CommandApdu {
-    fn name() -> String;
+    fn name() -> &'static str;
     fn apdu_bytes(&self) -> Vec<u8>
     where
         Self: serde::Serialize + Debug,
@@ -91,12 +155,12 @@ pub trait ResponseApdu {
     {
         let cbor_value: Value = from_reader(&cbor[..])?;
         let cbor_struct: Result<ErrorResponse, _> = cbor_value.deserialized();
+
         if let Ok(error_resp) = cbor_struct {
-            return Err(Error::CkTap {
-                error: error_resp.error,
-                code: error_resp.code,
-            });
+            let error = CkTapError::error_from_code(error_resp.code).unwrap_or(CkTapError::BadCBOR);
+            return Err(Error::CkTap(error));
         }
+
         let cbor_struct: Self = cbor_value.deserialized()?;
         Ok(cbor_struct)
     }
@@ -113,9 +177,10 @@ fn build_apdu(header: &[u8], command: &[u8]) -> Vec<u8> {
 pub struct AppletSelect {}
 
 impl CommandApdu for AppletSelect {
-    fn name() -> String {
-        String::default()
+    fn name() -> &'static str {
+        ""
     }
+
     fn apdu_bytes(&self) -> Vec<u8> {
         build_apdu(&SELECT_CLA_INS_P1P2, &APP_ID)
     }
@@ -125,7 +190,7 @@ impl CommandApdu for AppletSelect {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct StatusCommand {
     /// 'status' command
-    cmd: String,
+    cmd: &'static str,
 }
 
 impl Default for StatusCommand {
@@ -135,8 +200,8 @@ impl Default for StatusCommand {
 }
 
 impl CommandApdu for StatusCommand {
-    fn name() -> String {
-        "status".to_string()
+    fn name() -> &'static str {
+        "status"
     }
 }
 
@@ -154,7 +219,7 @@ pub struct StatusResponse {
     #[serde(with = "serde_bytes")]
     pub pubkey: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
     pub testnet: Option<bool>,
     #[serde(default)]
     pub auth_delay: Option<usize>,
@@ -169,29 +234,29 @@ impl ResponseApdu for StatusResponse {}
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct ReadCommand {
     /// 'read' command
-    cmd: String,
+    cmd: &'static str,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
+    nonce: [u8; 16],
     /// (TAPSIGNER only) auth is required, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Option<Vec<u8>>,
-    /// (TAPSIGNER only) auth is required encrypted CVC value, 6 to 32 bytes
+    epubkey: Option<[u8; 33]>,
+    /// (TAPSIGNER only) auth is required encrypted CVC value, 16 to 32 bytes
     #[serde(with = "serde_bytes")]
     xcvc: Option<Vec<u8>>,
 }
 
 impl ReadCommand {
-    pub fn authenticated(nonce: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn authenticated(nonce: [u8; 16], epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
         ReadCommand {
             cmd: Self::name(),
             nonce,
-            epubkey: Some(epubkey.serialize().to_vec()),
+            epubkey: Some(epubkey.serialize()),
             xcvc: Some(xcvc),
         }
     }
 
-    pub fn unauthenticated(nonce: Vec<u8>) -> Self {
+    pub fn unauthenticated(nonce: [u8; 16]) -> Self {
         ReadCommand {
             cmd: Self::name(),
             nonce,
@@ -202,8 +267,8 @@ impl ReadCommand {
 }
 
 impl CommandApdu for ReadCommand {
-    fn name() -> String {
-        "read".to_string()
+    fn name() -> &'static str {
+        "read"
     }
 }
 
@@ -225,7 +290,7 @@ pub struct ReadResponse {
     pub pubkey: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for ReadResponse {}
@@ -233,17 +298,17 @@ impl ResponseApdu for ReadResponse {}
 impl ReadResponse {
     pub fn signature(&self) -> Result<Signature, Error> {
         Signature::from_compact(self.sig.as_slice()).map_err(|e| Error::CiborValue(e.to_string()))
-        // .expect("Failed to construct ECDSA signature from ReadResponse")
     }
 
-    pub fn pubkey(&self, session_key: Option<SharedSecret>) -> PublicKey {
-        let pubkey = if let Some(sk) = session_key {
-            unzip(&self.pubkey, sk)
-        } else {
-            self.pubkey.clone()
+    pub fn pubkey(&self, session_key: Option<SharedSecret>) -> Result<PublicKey, Error> {
+        if let Some(sk) = session_key {
+            let pubkey_bytes = unzip(&self.pubkey, sk);
+            return PublicKey::from_slice(pubkey_bytes.as_slice())
+                .map_err(|e| Error::CiborValue(e.to_string()));
         };
-        PublicKey::from_slice(pubkey.as_slice())
-            .expect("Failed to construct a PublicKey from ReadResponse")
+
+        let pubkey_bytes = self.pubkey.as_slice();
+        PublicKey::from_slice(pubkey_bytes).map_err(|e| Error::CiborValue(e.to_string()))
     }
 }
 
@@ -261,16 +326,16 @@ fn unzip(encoded: &[u8], session_key: SharedSecret) -> Vec<u8> {
 
 impl fmt::Display for ReadResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "pubkey: {}", self.pubkey.to_hex())
+        write!(f, "pubkey: {}", self.pubkey.to_lower_hex_string())
     }
 }
 
 impl Debug for ReadResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("ReadResponse")
-            .field("sig", &self.sig.to_hex())
-            .field("pubkey", &self.pubkey.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("sig", &self.sig.to_lower_hex_string())
+            .field("pubkey", &self.pubkey.to_lower_hex_string())
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -278,27 +343,27 @@ impl Debug for ReadResponse {
 // Checks payment address derivation: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#satscard-checks-payment-address-derivation
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DeriveCommand {
-    cmd: String,
+    cmd: &'static str,
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
+    nonce: [u8; 16],
     path: Vec<u32>, // tapsigner: empty list for `m` case (a no-op)
-    /// app's ephemeral public key
+    /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Option<Vec<u8>>,
+    epubkey: Option<[u8; 33]>,
     /// encrypted CVC value
     #[serde(with = "serde_bytes")]
     xcvc: Option<Vec<u8>>,
 }
 
 impl CommandApdu for DeriveCommand {
-    fn name() -> String {
-        "derive".to_string()
+    fn name() -> &'static str {
+        "derive"
     }
 }
 
 impl DeriveCommand {
-    pub fn for_satscard(nonce: Vec<u8>) -> Self {
+    pub fn for_satscard(nonce: [u8; 16]) -> Self {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
@@ -309,7 +374,7 @@ impl DeriveCommand {
     }
 
     pub fn for_tapsigner(
-        nonce: Vec<u8>,
+        nonce: [u8; 16],
         path: Vec<u32>,
         epubkey: PublicKey,
         xcvc: Vec<u8>,
@@ -318,7 +383,7 @@ impl DeriveCommand {
             cmd: Self::name(),
             nonce,
             path,
-            epubkey: Some(epubkey.serialize().to_vec()),
+            epubkey: Some(epubkey.serialize()),
             xcvc: Some(xcvc),
         }
     }
@@ -327,20 +392,20 @@ impl DeriveCommand {
 #[derive(Deserialize, Clone)]
 pub struct DeriveResponse {
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>, // 64 bytes
+    pub sig: [u8; 64],
     /// chain code of derived subkey
     #[serde(with = "serde_bytes")]
-    pub chain_code: Vec<u8>, // 32 bytes
+    pub chain_code: [u8; 32],
     /// master public key in effect (`m`)
     #[serde(with = "serde_bytes")]
-    pub master_pubkey: Vec<u8>, // 33 bytes
+    pub master_pubkey: [u8; 33],
     /// derived public key for indicated path
     #[serde(with = "serde_bytes")]
     #[serde(default = "Option::default")]
-    pub pubkey: Option<Vec<u8>>, // 33 bytes
+    pub pubkey: Option<[u8; 33]>, //
     /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>, // 16 bytes
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for DeriveResponse {}
@@ -348,11 +413,11 @@ impl ResponseApdu for DeriveResponse {}
 impl Debug for DeriveResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("DeriveResponse")
-            .field("sig", &self.sig.to_hex())
-            .field("chain_code", &self.chain_code.to_hex())
-            .field("master_pubkey", &self.master_pubkey.to_hex())
-            .field("pubkey", &self.pubkey.clone().map(|pk| pk.to_hex()))
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("sig", &self.sig.to_lower_hex_string())
+            .field("chain_code", &self.chain_code.to_lower_hex_string())
+            .field("master_pubkey", &self.master_pubkey.to_lower_hex_string())
+            .field("pubkey", &self.pubkey.map(|pk| pk.to_lower_hex_string()))
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -364,12 +429,12 @@ impl Debug for DeriveResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct CertsCommand {
     /// 'certs' command
-    cmd: String,
+    cmd: &'static str,
 }
 
 impl CommandApdu for CertsCommand {
-    fn name() -> String {
-        "certs".to_string()
+    fn name() -> &'static str {
+        "certs"
     }
 }
 
@@ -407,7 +472,11 @@ impl CertsResponse {
 
 impl Debug for CertsResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let cert_hexes: Vec<String> = self.cert_chain().iter().map(|key| key.to_hex()).collect();
+        let cert_hexes: Vec<String> = self
+            .cert_chain()
+            .iter()
+            .map(|key| key.to_lower_hex_string())
+            .collect();
         f.debug_struct("CertsResponse")
             .field("cert_chain", &cert_hexes)
             .finish()
@@ -421,20 +490,20 @@ impl Debug for CertsResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct CheckCommand {
     /// 'check' command
-    cmd: String,
+    cmd: &'static str,
     /// random value from app, 16 bytes
     #[serde(with = "serde_bytes")]
-    nonce: Vec<u8>,
+    nonce: [u8; 16],
 }
 
 impl CommandApdu for CheckCommand {
-    fn name() -> String {
-        "check".to_string()
+    fn name() -> &'static str {
+        "check"
     }
 }
 
 impl CheckCommand {
-    pub fn new(nonce: Vec<u8>) -> Self {
+    pub fn new(nonce: [u8; 16]) -> Self {
         CheckCommand {
             cmd: Self::name(),
             nonce,
@@ -451,7 +520,7 @@ pub struct CheckResponse {
     pub auth_sig: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for CheckResponse {}
@@ -459,8 +528,8 @@ impl ResponseApdu for CheckResponse {}
 impl Debug for CheckResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("CheckResponse")
-            .field("auth_sig", &self.auth_sig.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("auth_sig", &self.auth_sig.to_lower_hex_string())
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -468,7 +537,7 @@ impl Debug for CheckResponse {
 /// nfc command to return dynamic url for NFC-enabled smart phone
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcCommand {
-    cmd: String,
+    cmd: &'static str,
 }
 
 impl Default for NfcCommand {
@@ -478,8 +547,8 @@ impl Default for NfcCommand {
 }
 
 impl CommandApdu for NfcCommand {
-    fn name() -> String {
-        "nfc".to_string()
+    fn name() -> &'static str {
+        "nfc"
     }
 }
 
@@ -505,15 +574,17 @@ impl ResponseApdu for NfcResponse {}
 // }
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignCommand {
-    cmd: String,
+    cmd: &'static str,
     slot: Option<u8>,
-    subpath: Option<[u32; 2]>,
+    // 0,1 or 2 length
+    #[serde(rename = "subpath")]
+    sub_path: Vec<u32>,
     // additional keypath for TapSigner only
     #[serde(with = "serde_bytes")]
-    digest: Vec<u8>,
+    digest: [u8; 32],
     // message digest to be signed
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>,
+    epubkey: [u8; 33],
     #[serde(with = "serde_bytes")]
     xcvc: Vec<u8>,
 }
@@ -531,27 +602,25 @@ impl SignCommand {
     // }
 
     pub fn for_tapsigner(
-        subpath: Option<[u32; 2]>,
-        digest: Vec<u8>,
+        sub_path: Vec<u32>,
+        digest: [u8; 32],
         epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
-        let cmd = Self::name();
-
         SignCommand {
-            cmd,
+            cmd: Self::name(),
             slot: Some(0),
-            subpath,
+            sub_path,
             digest,
-            epubkey: epubkey.serialize().to_vec(),
+            epubkey: epubkey.serialize(),
             xcvc,
         }
     }
 }
 
 impl CommandApdu for SignCommand {
-    fn name() -> String {
-        "sign".to_string()
+    fn name() -> &'static str {
+        "sign"
     }
 }
 
@@ -564,11 +633,11 @@ pub struct SignResponse {
     /// command result
     pub slot: u8,
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>,
+    pub sig: [u8; 64],
     #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
+    pub pubkey: [u8; 33],
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for SignResponse {}
@@ -577,9 +646,9 @@ impl Debug for SignResponse {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_struct("SignResponse")
             .field("slot", &self.slot)
-            .field("sig", &self.sig.to_hex())
-            .field("pubkey", &self.pubkey.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
+            .field("sig", &self.sig.to_lower_hex_string())
+            .field("pubkey", &self.pubkey.to_lower_hex_string())
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .finish()
     }
 }
@@ -597,17 +666,17 @@ impl Debug for SignResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct WaitCommand {
     /// 'wait' command
-    cmd: String,
-    /// app's ephemeral public key (optional)
+    cmd: &'static str,
+    /// app's ephemeral public key (optional), 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Option<Vec<u8>>,
-    /// encrypted CVC value (optional), 6 to 32 bytes
+    epubkey: Option<[u8; 33]>,
+    /// encrypted CVC value (optional), 16 to 32 bytes
     #[serde(with = "serde_bytes")]
     xcvc: Option<Vec<u8>>,
 }
 
 impl WaitCommand {
-    pub fn new(epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(epubkey: Option<[u8; 33]>, xcvc: Option<Vec<u8>>) -> Self {
         WaitCommand {
             cmd: Self::name(),
             epubkey,
@@ -617,8 +686,8 @@ impl WaitCommand {
 }
 
 impl CommandApdu for WaitCommand {
-    fn name() -> String {
-        "wait".to_string()
+    fn name() -> &'static str {
+        "wait"
     }
 }
 
@@ -646,25 +715,25 @@ impl ResponseApdu for WaitResponse {}
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct NewCommand {
     /// 'new' command
-    cmd: String,
+    cmd: &'static str,
     /// (use 0 for TapSigner) slot to be affected, must equal currently-active slot number
     slot: u8,
     /// app's entropy share to be applied to new slot (optional on SATSCARD)
     #[serde(with = "serde_bytes")]
-    chain_code: Option<Vec<u8>>, // 32 bytes
-    /// app's ephemeral public key
+    chain_code: Option<[u8; 32]>, // 32 bytes
+    /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>, // 33 bytes
+    epubkey: [u8; 33],
     /// encrypted CVC value
     #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>, // 6 bytes
+    xcvc: Vec<u8>, // 6-32 bytes
 }
 
 impl NewCommand {
     pub fn new(
         slot: Option<u8>,
-        chain_code: Option<Vec<u8>>,
-        epubkey: Vec<u8>,
+        chain_code: Option<[u8; 32]>,
+        epubkey: PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         let slot = slot.unwrap_or_default();
@@ -672,15 +741,15 @@ impl NewCommand {
             cmd: Self::name(),
             slot,
             chain_code,
-            epubkey,
+            epubkey: epubkey.serialize(),
             xcvc,
         }
     }
 }
 
 impl CommandApdu for NewCommand {
-    fn name() -> String {
-        "new".to_string()
+    fn name() -> &'static str {
+        "new"
     }
 }
 
@@ -702,7 +771,7 @@ pub struct NewResponse {
     pub slot: u8,
     /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>, // 16 bytes
+    pub card_nonce: [u8; 16], // 16 bytes
 }
 
 impl ResponseApdu for NewResponse {}
@@ -720,31 +789,31 @@ impl fmt::Display for NewResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct UnsealCommand {
     /// 'unseal' command
-    cmd: String,
+    cmd: &'static str,
     /// slot to be unsealed, must equal currently-active slot number
     slot: u8,
     /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>,
-    /// encrypted CVC value, 6 bytes
+    epubkey: [u8; 33],
+    /// encrypted CVC value, 6-32 bytes
     #[serde(with = "serde_bytes")]
     xcvc: Vec<u8>,
 }
 
 impl UnsealCommand {
-    pub fn new(slot: u8, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
+    pub fn new(slot: u8, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
         UnsealCommand {
             cmd: Self::name(),
             slot,
-            epubkey,
+            epubkey: epubkey.serialize(),
             xcvc,
         }
     }
 }
 
 impl CommandApdu for UnsealCommand {
-    fn name() -> String {
-        "unseal".to_string()
+    fn name() -> &'static str {
+        "unseal"
     }
 }
 
@@ -768,7 +837,7 @@ pub struct UnsealResponse {
     pub chain_code: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for UnsealResponse {}
@@ -799,13 +868,13 @@ impl fmt::Display for UnsealResponse {
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DumpCommand {
     /// 'dump' command
-    cmd: String,
+    cmd: &'static str,
     /// which slot to dump, must be unsealed.
     slot: usize,
     /// app's ephemeral public key (optional), 33 bytes
     #[serde(with = "serde_bytes")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    epubkey: Option<Vec<u8>>,
+    epubkey: Option<[u8; 33]>,
     /// encrypted CVC value (optional), 6 bytes
     #[serde(with = "serde_bytes")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -813,19 +882,19 @@ pub struct DumpCommand {
 }
 
 impl DumpCommand {
-    pub fn new(slot: usize, epubkey: Option<Vec<u8>>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(slot: usize, epubkey: Option<PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
         DumpCommand {
             cmd: Self::name(),
             slot,
-            epubkey,
+            epubkey: epubkey.map(|pk| pk.serialize()),
             xcvc,
         }
     }
 }
 
 impl CommandApdu for DumpCommand {
-    fn name() -> String {
-        "dump".to_string()
+    fn name() -> &'static str {
+        "dump"
     }
 }
 
@@ -867,54 +936,7 @@ pub struct DumpResponse {
     pub addr: Option<String>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for DumpResponse {}
-
-/// TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct XpubCommand {
-    cmd: String,  // always "xpub"
-    master: bool, // give master (`m`) XPUB, otherwise derived XPUB
-    #[serde(with = "serde_bytes")]
-    epubkey: Vec<u8>, // app's ephemeral public key (required)
-    #[serde(with = "serde_bytes")]
-    xcvc: Vec<u8>, //encrypted CVC value (required)
-}
-
-impl CommandApdu for XpubCommand {
-    fn name() -> String {
-        "xpub".to_string()
-    }
-}
-
-impl XpubCommand {
-    pub fn new(master: bool, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
-        Self {
-            cmd: Self::name(),
-            master,
-            epubkey: epubkey.serialize().to_vec(),
-            xcvc,
-        }
-    }
-}
-
-#[derive(Deserialize, Clone)]
-pub struct XpubResponse {
-    #[serde(with = "serde_bytes")]
-    pub xpub: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub card_nonce: Vec<u8>,
-}
-
-impl ResponseApdu for XpubResponse {}
-
-impl Debug for XpubResponse {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.debug_struct("XpubResponse")
-            .field("xpub", &self.xpub.to_hex())
-            .field("card_nonce", &self.card_nonce.to_hex())
-            .finish()
-    }
-}

@@ -6,6 +6,7 @@ use rust_cktap::commands::{CkTransport, Read};
 use rust_cktap::emulator;
 #[cfg(not(feature = "emulator"))]
 use rust_cktap::pcsc;
+use rust_cktap::secp256k1::hashes::Hash as _;
 use rust_cktap::secp256k1::rand;
 use rust_cktap::{apdu::Error, commands::Certificate, rand_chaincode, CkTapCard};
 use std::io;
@@ -65,16 +66,23 @@ enum TapSignerCommand {
         #[clap(short, long, value_delimiter = ',', num_args = 1..)]
         path: Vec<u32>,
     },
+    /// Get an encrypted backup of the card's private key
+    Backup,
+    /// Change the PIN (CVC) used for card authentication to a new user provided one
+    Change { new_cvc: String },
+    /// Sign a digest
+    Sign { to_sign: String },
 }
 
-fn main() -> Result<(), Error> {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     // figure out what type of card we have before parsing cli args
     #[cfg(not(feature = "emulator"))]
-    let mut card = pcsc::find_first()?;
+    let mut card = pcsc::find_first().await?;
 
     // if emulator feature enabled override pcsc card
     #[cfg(feature = "emulator")]
-    let mut card = emulator::find_emulator()?;
+    let mut card = emulator::find_emulator().await?;
 
     let rng = &mut rand::thread_rng();
 
@@ -86,21 +94,21 @@ fn main() -> Result<(), Error> {
                     dbg!(&sc);
                 }
                 SatsCardCommand::Address => println!("Address: {}", sc.address().unwrap()),
-                SatsCardCommand::Certs => check_cert(sc),
-                SatsCardCommand::Read => read(sc, None),
+                SatsCardCommand::Certs => check_cert(sc).await,
+                SatsCardCommand::Read => read(sc, None).await,
                 SatsCardCommand::New => {
                     let slot = sc.slot().expect("current slot number");
-                    let chain_code = Some(rand_chaincode(rng).to_vec());
-                    let response = &sc.new_slot(slot, chain_code, cvc()).unwrap();
+                    let chain_code = Some(rand_chaincode(rng));
+                    let response = &sc.new_slot(slot, chain_code, &cvc()).await.unwrap();
                     println!("{}", response)
                 }
                 SatsCardCommand::Unseal => {
                     let slot = sc.slot().expect("current slot number");
-                    let response = &sc.unseal(slot, cvc()).unwrap();
+                    let response = &sc.unseal(slot, &cvc()).await.unwrap();
                     println!("{}", response)
                 }
                 SatsCardCommand::Derive => {
-                    dbg!(&sc.derive());
+                    dbg!(&sc.derive().await);
                 }
             }
         }
@@ -110,15 +118,33 @@ fn main() -> Result<(), Error> {
                 TapSignerCommand::Debug => {
                     dbg!(&ts);
                 }
-                TapSignerCommand::Certs => check_cert(ts),
-                TapSignerCommand::Read => read(ts, Some(cvc())),
+                TapSignerCommand::Certs => check_cert(ts).await,
+                TapSignerCommand::Read => read(ts, Some(cvc())).await,
                 TapSignerCommand::Init => {
-                    let chain_code = rand_chaincode(rng).to_vec();
-                    let response = &ts.init(chain_code, cvc());
+                    let chain_code = rand_chaincode(rng);
+                    let response = &ts.init(chain_code, &cvc()).await;
                     dbg!(response);
                 }
                 TapSignerCommand::Derive { path } => {
-                    dbg!(&ts.derive(path, cvc()));
+                    dbg!(&ts.derive(&path, &cvc()).await);
+                }
+
+                TapSignerCommand::Backup => {
+                    let response = &ts.backup(&cvc()).await;
+                    println!("{:?}", response);
+                }
+
+                TapSignerCommand::Change { new_cvc } => {
+                    let response = &ts.change(&new_cvc, &cvc()).await;
+                    println!("{:?}", response);
+                }
+                TapSignerCommand::Sign { to_sign } => {
+                    let digest: [u8; 32] =
+                        rust_cktap::secp256k1::hashes::sha256::Hash::hash(to_sign.as_bytes())
+                            .to_byte_array();
+
+                    let response = &ts.sign(digest, vec![], &cvc()).await;
+                    println!("{:?}", response);
                 }
             }
         }
@@ -129,8 +155,11 @@ fn main() -> Result<(), Error> {
 
 // handler functions for each command
 
-fn check_cert<T: CkTransport>(card: &mut dyn Certificate<T>) {
-    if let Ok(k) = card.check_certificate() {
+async fn check_cert<C, T: CkTransport>(card: &mut C)
+where
+    C: Certificate<T>,
+{
+    if let Ok(k) = card.check_certificate().await {
         println!(
             "Genuine card from Coinkite.\nHas cert signed by: {}",
             k.name()
@@ -140,8 +169,11 @@ fn check_cert<T: CkTransport>(card: &mut dyn Certificate<T>) {
     }
 }
 
-fn read<T: CkTransport>(card: &mut dyn Read<T>, cvc: Option<String>) {
-    match card.read(cvc) {
+async fn read<C, T: CkTransport>(card: &mut C, cvc: Option<String>)
+where
+    C: Read<T>,
+{
+    match card.read(cvc).await {
         Ok(resp) => println!("{}", resp),
         Err(e) => {
             dbg!(&e);
