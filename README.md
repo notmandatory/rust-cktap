@@ -67,6 +67,12 @@ cargo run -p cktap-cli -- certs
 cargo run -p cktap-cli -- read
 ```
 
+## Minimum Supported Rust Version (MSRV)
+
+This library should always compile with any valid combination of features on Rust **1.81.0**.
+
+
+
 [SATSCARD]: https://satscard.com/
 [TAPSIGNER]: https://tapsigner.com/
 [SATSCHIP]: https://satschip.com/
