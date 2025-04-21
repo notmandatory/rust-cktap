@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/notmandatory/rust-cktap/blob/master/LICENSE)
 [![CI](https://github.com/notmandatory/rust-cktap/actions/workflows/test.yml/badge.svg)](https://github.com/notmandatory/rust-cktap/actions/workflows/test.yml)
-[![rustc](https://img.shields.io/badge/rustc-1.57.0%2B-lightgrey.svg)](https://blog.rust-lang.org/2021/12/02/Rust-1.57.0.html)
+[![rustc](https://img.shields.io/badge/rustc-1.81.0%2B-lightgrey.svg)](https://blog.rust-lang.org/2024/09/05/Rust-1.81.0/)
 
 A Rust implementation of the [Coinkite Tap Protocol](https://github.com/coinkite/coinkite-tap-proto) (cktap)
 for use with [SATSCARD], [TAPSIGNER], and [SATSCHIP] products.
