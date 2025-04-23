@@ -35,6 +35,7 @@ cargo build --package rust-cktap --profile release-smaller --target aarch64-appl
 
 # Then run uniffi-bindgen
 cargo run --bin uniffi-bindgen generate \
+    --features uniffi \
     --library target/aarch64-apple-ios/release-smaller/librust_cktap.dylib \
     --language swift \
     --out-dir cktap-swift/Sources/CKTap \
