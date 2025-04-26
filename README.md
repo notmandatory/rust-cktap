@@ -1,13 +1,13 @@
 # rust-cktap
 
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/notmandatory/rust-cktap/blob/master/LICENSE) 
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/notmandatory/rust-cktap/blob/master/LICENSE)
 [![CI](https://github.com/notmandatory/rust-cktap/actions/workflows/test.yml/badge.svg)](https://github.com/notmandatory/rust-cktap/actions/workflows/test.yml)
-[![rustc](https://img.shields.io/badge/rustc-1.57.0%2B-lightgrey.svg)](https://blog.rust-lang.org/2021/12/02/Rust-1.57.0.html)
+[![rustc](https://img.shields.io/badge/rustc-1.81.0%2B-lightgrey.svg)](https://blog.rust-lang.org/2024/09/05/Rust-1.81.0/)
 
 A Rust implementation of the [Coinkite Tap Protocol](https://github.com/coinkite/coinkite-tap-proto) (cktap)
 for use with [SATSCARD], [TAPSIGNER], and [SATSCHIP] products.
 
-This project provides PC/SC APDU message encoding and decoding, cvc authentication, certificate chain verification, and card response verification. 
+This project provides PC/SC APDU message encoding and decoding, cvc authentication, certificate chain verification, and card response verification.
 
 It is up to the crate user to send and receive the raw cktap APDU messages via NFC to the card by implementing the `CkTransport` trait. An example implementation is provided using the optional rust `pcsc` crate. Mobile users are expected to implement `CkTransport` using the iOS or Android provided libraries.
 
@@ -20,9 +20,9 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 
 - [x] [status](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#status)
 - [x] [read](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#status) (messages)
-  - [ ] response verification
+  - [x] response verification
 - [x] [derive](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive) (messages)
-  - [ ] response verification
+  - [x] response verification
 - [x] [certs](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#certs)
 - [x] [new](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#new)
 - [x] [nfc](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#nfc)
@@ -37,9 +37,9 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 
 #### TAPSIGNER-Only Commands
 
-- [ ] [change](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#change)
+- [x] [change](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#change)
 - [x] [xpub](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#xpub)
-- [ ] [backup](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#backup)
+- [x] [backup](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#backup)
 
 ### Automated Testing with Emulator
 
@@ -52,20 +52,26 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 
 #### Prerequisites
 
-1. USB PCSC NFC card reader, for example:  
-   * [OMNIKEY 5022 CL](https://www.hidglobal.com/products/omnikey-5022-reader)
+1. USB PCSC NFC card reader, for example:
+   - [OMNIKEY 5022 CL](https://www.hidglobal.com/products/omnikey-5022-reader)
 2. Coinkite SATSCARD, TAPSIGNER, or SATSCHIP cards
-Install vendor PCSC driver
+   Install vendor PCSC driver
 3. Connect NFC reader to desktop system
 4. Place SATSCARD, TAPSIGNER, or SATSCHIP on reader
- 
+
 #### Run CLI
 
-   ```
-   cargo run -p cktap-cli -- --help
-   cargo run -p cktap-cli -- certs
-   cargo run -p cktap-cli -- read
-   ```
+```
+cargo run -p cktap-cli -- --help
+cargo run -p cktap-cli -- certs
+cargo run -p cktap-cli -- read
+```
+
+## Minimum Supported Rust Version (MSRV)
+
+This library should always compile with any valid combination of features on Rust **1.81.0**.
+
+
 
 [SATSCARD]: https://satscard.com/
 [TAPSIGNER]: https://tapsigner.com/
