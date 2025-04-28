@@ -10,7 +10,7 @@ STATIC_LIB_NAME="lib${NAME}.a"
 NEW_HEADER_DIR="../target/include"
 
 # set required rust version and install component and targets
-rustup default 1.77.1
+rustup default 1.85.0
 rustup component add rust-src
 rustup target add aarch64-apple-ios # iOS arm64
 rustup target add x86_64-apple-ios # iOS x86_64
@@ -26,12 +26,17 @@ mkdir -p ../target/lipo-ios-sim/release-smaller
 
 cd ../ || exit
 
-# build cktap-ffi rust lib for apple targets
+# Target architectures
+# macOS Intel
 cargo build --package rust-cktap --profile release-smaller --target x86_64-apple-darwin
+# macOS Apple Silicon
 cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-darwin
+# Simulator on Intel Macs
 cargo build --package rust-cktap --profile release-smaller --target x86_64-apple-ios
-cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-ios
+# Simulator on Apple Silicon Mac
 cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-ios-sim
+# iPhone devices
+cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-ios
 
 # Then run uniffi-bindgen
 cargo run --bin uniffi-bindgen generate \
@@ -40,10 +45,11 @@ cargo run --bin uniffi-bindgen generate \
     --out-dir cktap-swift/Sources/CKTap \
     --no-format
 
-# combine cktap-ffi static libs for aarch64 and x86_64 targets via lipo tool
-lipo target/aarch64-apple-ios-sim/release-smaller/librust_cktap.a target/x86_64-apple-ios/release-smaller/librust_cktap.a -create -output target/lipo-ios-sim/release-smaller/libcktapFFI.a
+# Create universal library for simulator targets
+lipo target/aarch64-apple-ios-sim/release-smaller/librust_cktap.a target/x86_64-apple-ios/release-smaller/librust_cktap.a -create -output target/lipo-ios-sim/release-smaller/librust_cktap.a
 
-lipo target/aarch64-apple-darwin/release-smaller/librust_cktap.a target/x86_64-apple-darwin/release-smaller/librust_cktap.a -create -output target/lipo-macos/release-smaller/libcktapFFI.a
+# Create universal library for mac targets
+lipo target/aarch64-apple-darwin/release-smaller/librust_cktap.a target/x86_64-apple-darwin/release-smaller/librust_cktap.a -create -output target/lipo-macos/release-smaller/librust_cktap.a
 
 cd cktap-swift || exit
 
@@ -63,3 +69,4 @@ xcodebuild -create-xcframework \
     -library "${TARGETDIR}/lipo-ios-sim/${RELDIR}/librust_cktap.a" \
     -headers "${NEW_HEADER_DIR}" \
     -output "${OUTDIR}/${NAME}.xcframework"
+
