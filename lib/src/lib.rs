@@ -1,3 +1,4 @@
+#[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
 extern crate core;
@@ -13,7 +14,10 @@ pub use bitcoin::secp256k1::{self, rand};
 
 #[cfg(feature = "emulator")]
 pub mod emulator;
+
+#[cfg(feature = "uniffi")]
 mod ffi;
+
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
 pub mod sats_card;
