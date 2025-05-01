@@ -1,6 +1,3 @@
-#[cfg(feature = "uniffi")]
-uniffi::setup_scaffolding!();
-
 extern crate core;
 
 use bitcoin::key::rand::Rng as _;
@@ -14,9 +11,6 @@ pub use bitcoin::secp256k1::{self, rand};
 
 #[cfg(feature = "emulator")]
 pub mod emulator;
-
-#[cfg(feature = "uniffi")]
-mod ffi;
 
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
