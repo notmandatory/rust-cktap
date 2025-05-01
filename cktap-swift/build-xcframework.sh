@@ -28,20 +28,20 @@ cd ../ || exit
 
 # Target architectures
 # macOS Intel
-cargo build --package rust-cktap --profile release-smaller --target x86_64-apple-darwin
+cargo build --package rust-cktap --profile release-smaller --target x86_64-apple-darwin --features uniffi
 # macOS Apple Silicon
-cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-darwin
+cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-darwin --features uniffi
 # Simulator on Intel Macs
-cargo build --package rust-cktap --profile release-smaller --target x86_64-apple-ios
+cargo build --package rust-cktap --profile release-smaller --target x86_64-apple-ios --features uniffi
 # Simulator on Apple Silicon Mac
-cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-ios-sim
+cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-ios-sim --features uniffi
 # iPhone devices
-cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-ios
+cargo build --package rust-cktap --profile release-smaller --target aarch64-apple-ios --features uniffi
 
 # Then run uniffi-bindgen
 cargo run --bin uniffi-bindgen generate \
     --features uniffi \
-    --library target/aarch64-apple-ios/release-smaller/librust_cktap.dylib \
+    --manifest-path ../lib/Cargo.toml \
     --language swift \
     --out-dir cktap-swift/Sources/CKTap \
     --no-format
@@ -53,10 +53,6 @@ lipo target/aarch64-apple-ios-sim/release-smaller/librust_cktap.a target/x86_64-
 lipo target/aarch64-apple-darwin/release-smaller/librust_cktap.a target/x86_64-apple-darwin/release-smaller/librust_cktap.a -create -output target/lipo-macos/release-smaller/librust_cktap.a
 
 cd cktap-swift || exit
-
-# move cktap-ffi static lib header files to temporary directory
-mv "Sources/CKTap/rust_cktapFFI.h" "${NEW_HEADER_DIR}"
-mv "Sources/CKTap/rust_cktapFFI.modulemap" "${NEW_HEADER_DIR}/module.modulemap"
 
 # remove old xcframework directory
 rm -rf "${OUTDIR}/${NAME}.xcframework"
