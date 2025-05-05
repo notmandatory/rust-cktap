@@ -1,0 +1,21 @@
+[package]
+name = "cktap-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "cktap_ffi"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+rust-cktap = { path = "../lib" }
+uniffi = { version = "0.29", features = ["cli"], optional = true }
+thiserror = "1.0"
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"], optional = true }
+
+[features]
+default = []
+uniffi = ["dep:uniffi"] 
