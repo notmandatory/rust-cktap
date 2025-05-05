@@ -67,20 +67,29 @@ lipo target/aarch64-apple-darwin/${RELDIR}/${STATIC_LIB_FILENAME} \
 
 cd cktap-swift || exit
 
-# move cktap-ffi static lib header files to temporary directory
+# Unique subdir to prevent collisions
+UNIQUE_HEADER_SUBDIR="${NEW_HEADER_DIR}/${HEADER_BASENAME}"
+
+# Remove any previously generated headers to avoid duplicate module.modulemap files
+rm -rf "${NEW_HEADER_DIR:?}"/*
+
+mkdir -p "${UNIQUE_HEADER_SUBDIR}"
+
+# Move the header file into the unique subdirectory
 if [ -f "Sources/CKTap/${HEADER_FILENAME}" ]; then
-    mv "Sources/CKTap/${HEADER_FILENAME}" "${NEW_HEADER_DIR}/"
+    mv "Sources/CKTap/${HEADER_FILENAME}" "${UNIQUE_HEADER_SUBDIR}/"
 else
     echo "Warning: Could not find header file Sources/CKTap/${HEADER_FILENAME}"
 fi
 
-# Handle modulemap using the correct filename pattern
+# Handle modulemap using the correct filename pattern, placed inside unique subdirectory
 if [ -f "Sources/CKTap/${GENERATED_MODULEMAP}" ]; then
-    mv "Sources/CKTap/${GENERATED_MODULEMAP}" "${NEW_HEADER_DIR}/${MODULEMAP_FILENAME}"
+    mv "Sources/CKTap/${GENERATED_MODULEMAP}" "${UNIQUE_HEADER_SUBDIR}/${MODULEMAP_FILENAME}"
 else
     echo "Creating a standard module map."
-    echo "framework module ${NAME} { umbrella header \"${HEADER_FILENAME}\" export * }" > "${NEW_HEADER_DIR}/${MODULEMAP_FILENAME}"
+    echo "framework module ${NAME} { umbrella header \"${HEADER_FILENAME}\" export * }" > "${UNIQUE_HEADER_SUBDIR}/${MODULEMAP_FILENAME}"
 fi
+
 
 # remove old xcframework directory
 rm -rf "${OUTDIR}/${NAME}.xcframework"
