@@ -38,18 +38,18 @@ cd ../ || exit
 
 # Target architectures
 # macOS Intel
-cargo build --package ${FFI_PKG_NAME} --features uniffi --profile ${RELDIR} --target x86_64-apple-darwin
+cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target x86_64-apple-darwin
 # macOS Apple Silicon
-cargo build --package ${FFI_PKG_NAME} --features uniffi --profile ${RELDIR} --target aarch64-apple-darwin
+cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target aarch64-apple-darwin
 # Simulator on Intel Macs
-cargo build --package ${FFI_PKG_NAME} --features uniffi --profile ${RELDIR} --target x86_64-apple-ios
+cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target x86_64-apple-ios
 # Simulator on Apple Silicon Mac
-cargo build --package ${FFI_PKG_NAME} --features uniffi --profile ${RELDIR} --target aarch64-apple-ios-sim
+cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target aarch64-apple-ios-sim
 # iPhone devices
-cargo build --package ${FFI_PKG_NAME} --features uniffi --profile ${RELDIR} --target aarch64-apple-ios
+cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target aarch64-apple-ios
 
 # Then run uniffi-bindgen
-cargo run --package ${FFI_PKG_NAME} --bin uniffi-bindgen --features uniffi generate \
+cargo run --package ${FFI_PKG_NAME} --bin uniffi-bindgen generate \
     --library target/aarch64-apple-ios/${RELDIR}/${DYLIB_FILENAME} \
     --language swift \
     --out-dir cktap-swift/Sources/CKTap \
