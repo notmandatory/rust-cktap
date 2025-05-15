@@ -1,11 +1,9 @@
-#[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
 use rust_cktap::apdu::{AppletSelect, CommandApdu, ResponseApdu, StatusResponse};
 use rust_cktap::{rand_nonce as core_rand_nonce, Error as CoreError};
 use std::fmt::Debug;
 
-#[cfg(feature = "uniffi")]
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum Error {
     #[error("Core Error: {msg}")]
@@ -14,14 +12,12 @@ pub enum Error {
     Transport { msg: String },
 }
 
-#[cfg(feature = "uniffi")]
 impl From<CoreError> for Error {
     fn from(e: CoreError) -> Self {
         Error::Core { msg: e.to_string() }
     }
 }
 
-#[cfg(feature = "uniffi")]
 #[derive(uniffi::Record)]
 pub struct FfiStatusResponse {
     pub proto: u64,
@@ -41,7 +37,6 @@ pub struct FfiStatusResponse {
     pub auth_delay: Option<u64>,
 }
 
-#[cfg(feature = "uniffi")]
 impl From<StatusResponse> for FfiStatusResponse {
     fn from(sr: StatusResponse) -> Self {
         Self {
@@ -63,13 +58,11 @@ impl From<StatusResponse> for FfiStatusResponse {
     }
 }
 
-#[cfg(feature = "uniffi")]
 #[uniffi::export(callback_interface)]
 pub trait CkTransportFfi: Send + Sync + Debug + 'static {
     fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error>;
 }
 
-#[cfg(feature = "uniffi")]
 #[uniffi::export]
 pub async fn get_status(transport: Box<dyn CkTransportFfi>) -> Result<FfiStatusResponse, Error> {
     let cmd = AppletSelect::default();
@@ -81,7 +74,6 @@ pub async fn get_status(transport: Box<dyn CkTransportFfi>) -> Result<FfiStatusR
     Ok(response.into())
 }
 
-#[cfg(feature = "uniffi")]
 #[derive(uniffi::Record)]
 pub struct TestRecord {
     pub message: String,
@@ -89,13 +81,11 @@ pub struct TestRecord {
 }
 
 // this is actually a class per Object not Record
-#[cfg(feature = "uniffi")]
 #[derive(uniffi::Object)]
 pub struct TestStruct {
     pub value: u32,
 }
 
-#[cfg(feature = "uniffi")]
 #[uniffi::export]
 pub fn rand_nonce() -> Vec<u8> {
     core_rand_nonce().to_vec()

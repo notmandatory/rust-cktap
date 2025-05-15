@@ -10,12 +10,8 @@ crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 rust-cktap = { path = "../lib" }
-uniffi = { version = "0.29", features = ["cli"], optional = true }
+uniffi = { version = "0.29", features = ["cli"] }
 thiserror = "1.0"
-
-[build-dependencies]
-uniffi = { version = "0.29", features = ["build"], optional = true }
 
 [features]
 default = []
-uniffi = ["dep:uniffi"] 
