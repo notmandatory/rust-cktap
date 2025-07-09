@@ -1,8 +1,7 @@
-use bitcoin::secp256k1::{
-    ecdsa::Signature,
-    hashes::{sha256, Hash as _},
-    All, Message, PublicKey, Secp256k1,
-};
+use bitcoin::hashes::{sha256, Hash as _};
+use bitcoin::key::CompressedPublicKey as BitcoinPublicKey;
+use bitcoin::secp256k1::{ecdsa::Signature, All, Message, PublicKey, Secp256k1};
+use bitcoin::{Address, Network};
 
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, Error, NewCommand,
@@ -140,15 +139,12 @@ impl<T: CkTransport> SatsCard<T> {
         self.transport.transmit(&dump_command).await
     }
 
-    pub fn address(&mut self) -> Result<String, Error> {
-        // let pubkey = self.read(None).unwrap().pubkey;
-        // // let hrp = match self.testnet() { }
-        // let encoded = bech32::encode("bc", pubkey.to_base32(), Variant::Bech32);
-        // match encoded {
-        //     Ok(e) => Ok(e),
-        //     Err(_) => panic!("Failed to encoded pubkey")
-        // }
-        todo!()
+    pub fn address(&self) -> Result<String, Error> {
+        // TODO: support testnet
+        let network = Network::Bitcoin;
+        let pk = BitcoinPublicKey::from_slice(&self.pubkey.serialize())?;
+        let address = Address::p2wpkh(&pk, network);
+        Ok(address.to_string())
     }
 }
 
