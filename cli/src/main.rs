@@ -100,12 +100,12 @@ async fn main() -> Result<(), Error> {
                     let slot = sc.slot().expect("current slot number");
                     let chain_code = Some(rand_chaincode(rng));
                     let response = &sc.new_slot(slot, chain_code, &cvc()).await.unwrap();
-                    println!("{}", response)
+                    println!("{response}")
                 }
                 SatsCardCommand::Unseal => {
                     let slot = sc.slot().expect("current slot number");
                     let response = &sc.unseal(slot, &cvc()).await.unwrap();
-                    println!("{}", response)
+                    println!("{response}")
                 }
                 SatsCardCommand::Derive => {
                     dbg!(&sc.derive().await);
@@ -131,12 +131,12 @@ async fn main() -> Result<(), Error> {
 
                 TapSignerCommand::Backup => {
                     let response = &ts.backup(&cvc()).await;
-                    println!("{:?}", response);
+                    println!("{response:?}");
                 }
 
                 TapSignerCommand::Change { new_cvc } => {
                     let response = &ts.change(&new_cvc, &cvc()).await;
-                    println!("{:?}", response);
+                    println!("{response:?}");
                 }
                 TapSignerCommand::Sign { to_sign } => {
                     let digest: [u8; 32] =
@@ -144,7 +144,7 @@ async fn main() -> Result<(), Error> {
                             .to_byte_array();
 
                     let response = &ts.sign(digest, vec![], &cvc()).await;
-                    println!("{:?}", response);
+                    println!("{response:?}");
                 }
             }
         }
@@ -174,7 +174,7 @@ where
     C: Read<T>,
 {
     match card.read(cvc).await {
-        Ok(resp) => println!("{}", resp),
+        Ok(resp) => println!("{resp}"),
         Err(e) => {
             dbg!(&e);
             println!("Failed to read with error: ")

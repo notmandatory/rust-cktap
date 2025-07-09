@@ -848,8 +848,8 @@ impl fmt::Display for UnsealResponse {
         let pubkey = PublicKey::from_slice(self.pubkey.as_slice()).unwrap();
         let privkey = SecretKey::from_slice(self.privkey.as_slice()).unwrap();
         writeln!(f, "slot: {}", self.slot)?;
-        writeln!(f, "master_pk: {}", master)?;
-        writeln!(f, "pubkey: {}", pubkey)?;
+        writeln!(f, "master_pk: {master}")?;
+        writeln!(f, "pubkey: {pubkey}")?;
         writeln!(f, "privkey: {}", privkey.display_secret())
     }
 }

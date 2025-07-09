@@ -33,13 +33,13 @@ impl<T: CkTransport> core::fmt::Debug for CkTapCard<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self {
             CkTapCard::TapSigner(t) => {
-                write!(f, "CkTap::TapSigner({:?})", t)
+                write!(f, "CkTap::TapSigner({t:?})")
             }
             CkTapCard::SatsChip(t) => {
-                write!(f, "CkTap::SatsChip({:?})", t)
+                write!(f, "CkTap::SatsChip({t:?})")
             }
             CkTapCard::SatsCard(s) => {
-                write!(f, "CkTap::SatsCard({:?})", s)
+                write!(f, "CkTap::SatsCard({s:?})")
             }
         }
     }
