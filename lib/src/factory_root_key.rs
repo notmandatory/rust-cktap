@@ -44,10 +44,10 @@ impl Debug for FactoryRootKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             FactoryRootKey::Pub(pk) => {
-                write!(f, "FactoryRootKey::Pub({:?})", pk)
+                write!(f, "FactoryRootKey::Pub({pk:?})")
             }
             FactoryRootKey::Dev(pk) => {
-                write!(f, "FactoryRootKey::Dev({:?})", pk)
+                write!(f, "FactoryRootKey::Dev({pk:?})")
             }
         }
     }
