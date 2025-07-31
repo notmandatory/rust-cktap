@@ -93,7 +93,7 @@ async fn main() -> Result<(), Error> {
                 SatsCardCommand::Debug => {
                     dbg!(&sc);
                 }
-                SatsCardCommand::Address => println!("Address: {}", sc.address().unwrap()),
+                SatsCardCommand::Address => println!("Address: {}", sc.address().await.unwrap()),
                 SatsCardCommand::Certs => check_cert(sc).await,
                 SatsCardCommand::Read => read(sc, None).await,
                 SatsCardCommand::New => {
