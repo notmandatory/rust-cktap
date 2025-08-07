@@ -7,7 +7,12 @@ pub mod apdu;
 pub mod commands;
 pub mod factory_root_key;
 
-pub use bitcoin::secp256k1::{self, rand};
+pub use bitcoin::{
+    Address, Network,
+    key::CompressedPublicKey,
+    key::UntweakedPublicKey,
+    secp256k1::{self, rand},
+};
 
 #[cfg(feature = "emulator")]
 pub mod emulator;

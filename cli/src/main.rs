@@ -1,7 +1,7 @@
 /// CLI for rust-cktap
 use clap::{Parser, Subcommand};
 use rpassword::read_password;
-use rust_cktap::commands::{CkTransport, Read};
+use rust_cktap::commands::{Authentication, CkTransport, Read, Wait};
 #[cfg(feature = "emulator")]
 use rust_cktap::emulator;
 #[cfg(not(feature = "emulator"))]
@@ -41,6 +41,8 @@ enum SatsCardCommand {
     Unseal,
     /// Get the payment address and verify it follows from the chain code and master public key
     Derive,
+    /// Call wait command until no auth delay
+    Wait,
 }
 
 /// TapSigner CLI
@@ -75,6 +77,8 @@ enum TapSignerCommand {
     Change { new_cvc: String },
     /// Sign a digest
     Sign { to_sign: String },
+    /// Call wait command until no auth delay
+    Wait,
 }
 
 /// TapSigner CLI
@@ -107,6 +111,8 @@ enum SatsChipCommand {
     Change { new_cvc: String },
     /// Sign a digest
     Sign { to_sign: String },
+    /// Call wait command until no auth delay
+    Wait,
 }
 
 #[tokio::main]
@@ -145,6 +151,7 @@ async fn main() -> Result<(), Error> {
                 SatsCardCommand::Derive => {
                     dbg!(&sc.derive().await);
                 }
+                SatsCardCommand::Wait => wait(sc).await,
             }
         }
         CkTapCard::TapSigner(ts) => {
@@ -181,6 +188,7 @@ async fn main() -> Result<(), Error> {
                     let response = &ts.sign(digest, vec![], &cvc()).await;
                     println!("{response:?}");
                 }
+                TapSignerCommand::Wait => wait(ts).await,
             }
         }
         CkTapCard::SatsChip(sc) => {
@@ -212,6 +220,7 @@ async fn main() -> Result<(), Error> {
                     let response = &sc.sign(digest, vec![], &cvc()).await;
                     println!("{response:?}");
                 }
+                SatsChipCommand::Wait => wait(sc).await,
             }
         }
     }
@@ -253,4 +262,26 @@ fn cvc() -> String {
     io::stdout().flush().unwrap();
     let cvc = read_password().unwrap();
     cvc.trim().to_string()
+}
+
+async fn wait<C, T: CkTransport>(card: &mut C)
+where
+    C: Authentication<T> + Wait<T>,
+{
+    // if auth delay call wait
+    if card.auth_delay().is_some() {
+        let mut entered_cvc = None;
+        while card.auth_delay().is_some() {
+            if entered_cvc.is_none() {
+                entered_cvc = Some(cvc());
+                print!("Auth delay:");
+                io::stdout().flush().unwrap();
+            }
+            print!(" {}", card.auth_delay().unwrap());
+            io::stdout().flush().unwrap();
+            let _result = card.wait(entered_cvc.clone()).await.expect("wait failed");
+        }
+        println!();
+    }
+    println!("No auth delay.");
 }

@@ -145,7 +145,6 @@ impl<T: CkTransport> SatsCard<T> {
     }
 
     pub async fn address(&mut self) -> Result<String, Error> {
-        // TODO: support testnet
         let network = Network::Bitcoin;
         let slot_pubkey = self.read(None).await?.pubkey;
         let pk = BitcoinPublicKey::from_slice(&slot_pubkey)?;
