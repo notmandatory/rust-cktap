@@ -8,6 +8,7 @@ use crate::apdu::{
     NewResponse, StatusResponse, UnsealCommand, UnsealResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
+use crate::secp256k1::hashes::hex::DisplayHex;
 
 pub struct SatsCard<T: CkTransport> {
     pub transport: T,
@@ -25,6 +26,10 @@ pub struct SatsCard<T: CkTransport> {
 impl<T: CkTransport> Authentication<T> for SatsCard<T> {
     fn secp(&self) -> &Secp256k1<All> {
         &self.secp
+    }
+
+    fn ver(&self) -> &str {
+        &self.ver
     }
 
     fn pubkey(&self) -> &PublicKey {
@@ -161,20 +166,9 @@ impl<T: CkTransport> Read<T> for SatsCard<T> {
 }
 
 impl<T: CkTransport> Certificate<T> for SatsCard<T> {
-    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message {
-        let mut message_bytes: Vec<u8> = Vec::new();
-        message_bytes.extend("OPENDIME".as_bytes());
-        message_bytes.extend(card_nonce);
-        message_bytes.extend(app_nonce);
-        if self.ver != "0.9.0" {
-            // Since this calls an async method, for now we don't include the pubkey
-            // A better solution would be to store the pubkey
-            // let pubkey = self.read(None).await.unwrap().pubkey;
-            // message_bytes.extend(pubkey);
-        }
-
-        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
-        Message::from_digest(message_bytes_hash.to_byte_array())
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
+        let pubkey = self.read(None).await?.pubkey(None)?;
+        Ok(Some(pubkey))
     }
 }
 
@@ -187,7 +181,7 @@ impl<T: CkTransport> core::fmt::Debug for SatsCard<T> {
             .field("slots", &self.slots)
             .field("addr", &self.addr)
             .field("pubkey", &self.pubkey)
-            .field("card_nonce", &self.card_nonce)
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .field("auth_delay", &self.auth_delay)
             .finish()
     }

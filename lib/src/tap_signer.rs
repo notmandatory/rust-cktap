@@ -1,3 +1,4 @@
+use bitcoin::hex::DisplayHex;
 use bitcoin::secp256k1::{
     self,
     ecdsa::Signature,
@@ -81,6 +82,10 @@ pub enum PsbtSignError {
 impl<T: CkTransport> Authentication<T> for TapSigner<T> {
     fn secp(&self) -> &Secp256k1<All> {
         &self.secp
+    }
+
+    fn ver(&self) -> &str {
+        &self.ver
     }
 
     fn pubkey(&self) -> &PublicKey {
@@ -402,14 +407,8 @@ impl<T: CkTransport> Read<T> for TapSigner<T> {
 }
 
 impl<T: CkTransport> Certificate<T> for TapSigner<T> {
-    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message {
-        let mut message_bytes: Vec<u8> = Vec::new();
-        message_bytes.extend("OPENDIME".as_bytes());
-        message_bytes.extend(card_nonce);
-        message_bytes.extend(app_nonce);
-
-        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
-        Message::from_digest(message_bytes_hash.to_byte_array())
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
+        Ok(None)
     }
 }
 
@@ -422,7 +421,7 @@ impl<T: CkTransport> core::fmt::Debug for TapSigner<T> {
             .field("path", &self.path)
             .field("num_backups", &self.num_backups)
             .field("pubkey", &self.pubkey)
-            .field("card_nonce", &self.card_nonce)
+            .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .field("auth_delay", &self.auth_delay)
             .finish()
     }
