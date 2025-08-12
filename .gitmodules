@@ -1,0 +1,3 @@
+[submodule "coinkite/coinkite-tap-proto"]
+	path = coinkite/coinkite-tap-proto
+	url = https://github.com/coinkite/coinkite-tap-proto.git
