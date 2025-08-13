@@ -16,6 +16,7 @@ use std::future::Future;
 // Helper functions for authenticated commands.
 pub trait Authentication<T: CkTransport> {
     fn secp(&self) -> &Secp256k1<All>;
+    fn ver(&self) -> &str;
     fn pubkey(&self) -> &PublicKey;
     fn card_nonce(&self) -> &[u8; 16];
     fn set_card_nonce(&mut self, new_nonce: [u8; 16]);
@@ -175,16 +176,35 @@ where
     }
 }
 
-pub trait Certificate<T>: Authentication<T>
+pub trait Certificate<T>: Read<T>
 where
     T: CkTransport,
 {
-    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message;
+    fn message_digest_with_slot_pubkey(
+        &self,
+        card_nonce: [u8; 16],
+        app_nonce: [u8; 16],
+        slot_pubkey: Option<PublicKey>,
+    ) -> Message {
+        let mut message_bytes: Vec<u8> = Vec::new();
+        message_bytes.extend("OPENDIME".as_bytes());
+        message_bytes.extend(card_nonce);
+        message_bytes.extend(app_nonce);
+
+        if let Some(pubkey) = slot_pubkey {
+            if self.ver() != "0.9.0" {
+                let slot_pubkey_bytes = pubkey.serialize();
+                message_bytes.extend(slot_pubkey_bytes);
+            }
+        }
+
+        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+        Message::from_digest(message_bytes_hash.to_byte_array())
+    }
 
     fn check_certificate(&mut self) -> impl Future<Output = Result<FactoryRootKey, Error>> {
         async {
             let nonce = rand_nonce();
-
             let card_nonce = *self.card_nonce();
 
             let certs_cmd = CertsCommand::default();
@@ -192,9 +212,10 @@ where
 
             let check_cmd = CheckCommand::new(nonce);
             let check_response: CheckResponse = self.transport().transmit(&check_cmd).await?;
-
             self.set_card_nonce(check_response.card_nonce);
-            self.verify_card_signature(check_response.auth_sig, card_nonce, nonce)?;
+
+            let slot_pubkey = self.slot_pubkey().await?;
+            self.verify_card_signature(check_response.auth_sig, card_nonce, nonce, slot_pubkey)?;
 
             let mut pubkey = *self.pubkey();
             for sig in &certs_response.cert_chain() {
@@ -206,14 +227,14 @@ where
                     39..=42 => 39, // Segwit Bech32
                     _ => panic!("Unrecognized BIP-137 address"),
                 };
-
                 let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by)?;
                 let (_, sig) = sig.split_at(1);
-                let rec_sig = RecoverableSignature::from_compact(sig, rec_id)?;
-
-                let pubkey_hash = sha256::Hash::hash(&pubkey.serialize_uncompressed());
+                let result = RecoverableSignature::from_compact(sig, rec_id);
+                let rec_sig = result?;
+                let pubkey_hash = sha256::Hash::hash(&pubkey.serialize());
                 let md = Message::from_digest(pubkey_hash.to_byte_array());
-                pubkey = self.secp().recover_ecdsa(&md, &rec_sig)?;
+                let result = self.secp().recover_ecdsa(&md, &rec_sig);
+                pubkey = result?;
             }
 
             FactoryRootKey::try_from(pubkey)
@@ -225,13 +246,18 @@ where
         signature: Vec<u8>,
         card_nonce: [u8; 16],
         app_nonce: [u8; 16],
+        slot_pubkey: Option<PublicKey>,
     ) -> Result<(), secp256k1::Error> {
-        let message = self.message_digest(card_nonce, app_nonce);
+        let message = self.message_digest_with_slot_pubkey(card_nonce, app_nonce, slot_pubkey);
         let signature = Signature::from_compact(signature.as_slice())
             .expect("Failed to construct ECDSA signature from check response");
-        self.secp()
-            .verify_ecdsa(&message, &signature, self.pubkey())
+        let result = self
+            .secp()
+            .verify_ecdsa(&message, &signature, self.pubkey());
+        result
     }
+
+    fn slot_pubkey(&mut self) -> impl Future<Output = Result<Option<PublicKey>, Error>>;
 }
 
 #[cfg(feature = "emulator")]
