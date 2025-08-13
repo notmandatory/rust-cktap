@@ -2,6 +2,12 @@
 resolver = "2"
 members = ["lib", "cli", "cktap-ffi"]
 
+[workspace.package]
+edition = "2024"
+authors = ["rust-cktap developers"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/notmandatory/rust-cktap"
+
 [profile.release-smaller]
 inherits = "release"
 opt-level = 'z'

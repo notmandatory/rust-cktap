@@ -1,13 +1,15 @@
 [package]
 name = "rust-cktap"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 crate-type = ["lib"]
 name = "rust_cktap"
-
 
 [dependencies]
 ciborium = "0.2.0"

@@ -1,17 +1,16 @@
 use bitcoin::hex::DisplayHex;
 use bitcoin::secp256k1::{
-    self,
+    self, All, Message, PublicKey, Secp256k1,
     ecdsa::Signature,
-    hashes::{sha256, Hash as _},
-    All, Message, PublicKey, Secp256k1,
+    hashes::{Hash as _, sha256},
 };
 use log::error;
 use std::future::Future;
 
 use crate::apdu::{
-    tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
     CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand, NewResponse, SignCommand,
     SignResponse, StatusCommand, StatusResponse,
+    tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
 

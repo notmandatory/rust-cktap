@@ -2,7 +2,7 @@ extern crate core;
 
 use crate::Error;
 use crate::{CkTapCard, CkTransport};
-use pcsc::{Card, Context, Protocols, Scope, ShareMode, MAX_BUFFER_SIZE};
+use pcsc::{Card, Context, MAX_BUFFER_SIZE, Protocols, Scope, ShareMode};
 
 pub async fn find_first() -> Result<CkTapCard<Card>, Error> {
     // Establish a PC/SC context.

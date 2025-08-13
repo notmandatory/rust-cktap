@@ -1,6 +1,6 @@
+use crate::CkTapCard;
 use crate::apdu::{AppletSelect, CommandApdu, Error, StatusCommand};
 use crate::commands::CkTransport;
-use crate::CkTapCard;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;

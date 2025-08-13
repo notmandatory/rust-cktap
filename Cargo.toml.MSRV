@@ -1,2 +1,8 @@
 [workspace]
 members = ["lib"]
+
+[workspace.package]
+edition = "2024"
+authors = ["rust-cktap developers"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/notmandatory/rust-cktap"

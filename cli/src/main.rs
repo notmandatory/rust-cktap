@@ -9,7 +9,7 @@ use rust_cktap::pcsc;
 use rust_cktap::secp256k1::hashes::Hash as _;
 use rust_cktap::secp256k1::rand;
 use rust_cktap::tap_signer::TapSignerShared;
-use rust_cktap::{apdu::Error, commands::Certificate, rand_chaincode, CkTapCard};
+use rust_cktap::{CkTapCard, apdu::Error, commands::Certificate, rand_chaincode};
 use std::io;
 use std::io::Write;
 #[cfg(feature = "emulator")]

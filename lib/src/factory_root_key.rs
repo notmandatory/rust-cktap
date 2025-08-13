@@ -1,6 +1,6 @@
 use crate::apdu::Error;
-use bitcoin::secp256k1::hashes::hex::DisplayHex;
 use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1::hashes::hex::DisplayHex;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;

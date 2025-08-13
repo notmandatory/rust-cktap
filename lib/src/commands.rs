@@ -1,11 +1,11 @@
 use crate::factory_root_key::FactoryRootKey;
-use crate::{apdu::*, rand_nonce};
 use crate::{CkTapCard, SatsCard, TapSigner};
+use crate::{apdu::*, rand_nonce};
 
 use bitcoin::key::rand;
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
-use bitcoin::secp256k1::hashes::{sha256, Hash};
+use bitcoin::secp256k1::hashes::{Hash, sha256};
 use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, SecretKey};
 
 use std::convert::TryFrom;
@@ -252,10 +252,8 @@ where
         let message = self.message_digest_with_slot_pubkey(card_nonce, app_nonce, slot_pubkey);
         let signature = Signature::from_compact(signature.as_slice())
             .expect("Failed to construct ECDSA signature from check response");
-        let result = self
-            .secp()
-            .verify_ecdsa(&message, &signature, self.pubkey());
-        result
+        self.secp()
+            .verify_ecdsa(&message, &signature, self.pubkey())
     }
 
     fn slot_pubkey(&mut self) -> impl Future<Output = Result<Option<PublicKey>, Error>>;
@@ -267,9 +265,9 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    use crate::emulator::CVC;
     use crate::emulator::find_emulator;
     use crate::emulator::test::{CardTypeOption, EcardSubprocess};
-    use crate::emulator::CVC;
     use crate::rand_chaincode;
     use crate::tap_signer::TapSignerShared;
 

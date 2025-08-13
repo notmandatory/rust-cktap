@@ -1,6 +1,6 @@
-use bitcoin::hashes::{sha256, Hash as _};
+use bitcoin::hashes::{Hash as _, sha256};
 use bitcoin::key::CompressedPublicKey as BitcoinPublicKey;
-use bitcoin::secp256k1::{ecdsa::Signature, All, Message, PublicKey, Secp256k1};
+use bitcoin::secp256k1::{All, Message, PublicKey, Secp256k1, ecdsa::Signature};
 use bitcoin::{Address, Network};
 
 use crate::apdu::{

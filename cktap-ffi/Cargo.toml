@@ -1,8 +1,10 @@
 [package]
 name = "cktap-ffi"
 version = "0.1.0"
-edition = "2021"
-license = "MIT"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lib]
 name = "cktap_ffi"

@@ -3,8 +3,8 @@
 pub mod tap_signer;
 
 use bitcoin::secp256k1::{
-    self, ecdh::SharedSecret, ecdsa::Signature, hashes::hex::DisplayHex, PublicKey, SecretKey,
-    XOnlyPublicKey,
+    self, PublicKey, SecretKey, XOnlyPublicKey, ecdh::SharedSecret, ecdsa::Signature,
+    hashes::hex::DisplayHex,
 };
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;

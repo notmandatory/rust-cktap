@@ -2,7 +2,7 @@ extern crate core;
 
 use rust_cktap::apdu::Error;
 use rust_cktap::commands::{Certificate, Wait};
-use rust_cktap::{pcsc, rand_chaincode, CkTapCard};
+use rust_cktap::{CkTapCard, pcsc, rand_chaincode};
 
 use bitcoin::secp256k1::rand;
 use rust_cktap::tap_signer::TapSignerShared;
