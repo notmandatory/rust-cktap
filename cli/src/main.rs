@@ -8,9 +8,11 @@ use rust_cktap::emulator;
 use rust_cktap::pcsc;
 use rust_cktap::secp256k1::hashes::Hash as _;
 use rust_cktap::secp256k1::rand;
+use rust_cktap::tap_signer::TapSignerShared;
 use rust_cktap::{apdu::Error, commands::Certificate, rand_chaincode, CkTapCard};
 use std::io;
 use std::io::Write;
+use std::path::Path;
 
 /// SatsCard CLI
 #[derive(Parser)]
@@ -74,6 +76,38 @@ enum TapSignerCommand {
     Sign { to_sign: String },
 }
 
+/// TapSigner CLI
+#[derive(Parser)]
+#[command(author, version = option_env ! ("CARGO_PKG_VERSION").unwrap_or("unknown"), about,
+long_about = None, propagate_version = true)]
+struct SatsChipCli {
+    #[command(subcommand)]
+    command: SatsChipCommand,
+}
+
+/// Commands supported by SatsChip cards
+#[derive(Subcommand)]
+enum SatsChipCommand {
+    /// Show the card status
+    Debug,
+    /// Check this card was made by Coinkite: Verifies a certificate chain up to root factory key.
+    Certs,
+    /// Read the pubkey (requires CVC)
+    Read,
+    /// This command is used once to initialize a new card.
+    Init,
+    /// Derive a public key at the given hardened path
+    Derive {
+        /// path, eg. for 84'/0'/0'/* use 84,0,0
+        #[clap(short, long, value_delimiter = ',', num_args = 1..)]
+        path: Vec<u32>,
+    },
+    /// Change the PIN (CVC) used for card authentication to a new user provided one
+    Change { new_cvc: String },
+    /// Sign a digest
+    Sign { to_sign: String },
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // figure out what type of card we have before parsing cli args
@@ -82,7 +116,7 @@ async fn main() -> Result<(), Error> {
 
     // if emulator feature enabled override pcsc card
     #[cfg(feature = "emulator")]
-    let mut card = emulator::find_emulator().await?;
+    let mut card = emulator::find_emulator(Path::new("/tmp/ecard-pipe")).await?;
 
     let rng = &mut rand::thread_rng();
 
@@ -112,7 +146,7 @@ async fn main() -> Result<(), Error> {
                 }
             }
         }
-        CkTapCard::TapSigner(ts) | CkTapCard::SatsChip(ts) => {
+        CkTapCard::TapSigner(ts) => {
             let cli = TapSignerCli::parse();
             match cli.command {
                 TapSignerCommand::Debug => {
@@ -144,6 +178,37 @@ async fn main() -> Result<(), Error> {
                             .to_byte_array();
 
                     let response = &ts.sign(digest, vec![], &cvc()).await;
+                    println!("{response:?}");
+                }
+            }
+        }
+        CkTapCard::SatsChip(sc) => {
+            let cli = SatsChipCli::parse();
+            match cli.command {
+                SatsChipCommand::Debug => {
+                    dbg!(&sc);
+                }
+                SatsChipCommand::Certs => check_cert(sc).await,
+                SatsChipCommand::Read => read(sc, Some(cvc())).await,
+                SatsChipCommand::Init => {
+                    let chain_code = rand_chaincode(rng);
+                    let response = &sc.init(chain_code, &cvc()).await;
+                    dbg!(response);
+                }
+                SatsChipCommand::Derive { path } => {
+                    dbg!(&sc.derive(&path, &cvc()).await);
+                }
+
+                SatsChipCommand::Change { new_cvc } => {
+                    let response = &sc.change(&new_cvc, &cvc()).await;
+                    println!("{response:?}");
+                }
+                SatsChipCommand::Sign { to_sign } => {
+                    let digest: [u8; 32] =
+                        rust_cktap::secp256k1::hashes::sha256::Hash::hash(to_sign.as_bytes())
+                            .to_byte_array();
+
+                    let response = &sc.sign(digest, vec![], &cvc()).await;
                     println!("{response:?}");
                 }
             }

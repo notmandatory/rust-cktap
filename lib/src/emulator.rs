@@ -8,12 +8,11 @@ use std::string::ToString;
 
 pub const CVC: &str = "123456";
 
-pub async fn find_emulator() -> Result<CkTapCard<CardEmulator>, Error> {
-    let pipe_path = Path::new("/tmp/ecard-pipe");
+pub async fn find_emulator(pipe_path: &Path) -> Result<CkTapCard<CardEmulator>, Error> {
     if !pipe_path.exists() {
         return Err(Error::Emulator("Emulator pipe doesn't exist.".to_string()));
     }
-    let stream = UnixStream::connect("/tmp/ecard-pipe").expect("unix stream");
+    let stream = UnixStream::connect(pipe_path).expect("unix stream");
     let card_emulator = CardEmulator { stream };
     card_emulator.to_cktap().await
 }
@@ -51,10 +50,78 @@ impl CkTransport for CardEmulator {
 #[cfg(test)]
 pub mod test {
     use crate::emulator::find_emulator;
+    use std::fmt::Display;
+    use std::path::Path;
+    use std::process::{Child, Command, Stdio};
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    pub struct EcardSubprocess {
+        pub child: Child,
+    }
+
+    #[derive(Debug, Clone, Eq, PartialEq)]
+    pub enum CardTypeOption {
+        SatsCard,
+        TapSigner,
+        SatsChip,
+    }
+
+    impl Display for CardTypeOption {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let str = match self {
+                CardTypeOption::SatsCard => String::from("--satscard"),
+                CardTypeOption::SatsChip => String::from("--satschip"),
+                CardTypeOption::TapSigner => String::from("--tapsigner"),
+            };
+            write!(f, "{str}")
+        }
+    }
+
+    impl EcardSubprocess {
+        pub fn new(
+            pipe_path: &Path,
+            card_type: &CardTypeOption,
+            no_init: bool,
+        ) -> Result<Self, Box<dyn std::error::Error>> {
+            // execute ecard.py python script
+            let mut command = Command::new("python3");
+            command
+                .arg("../coinkite/coinkite-tap-proto/emulator/ecard.py")
+                // use rng seed so root cert is always:
+                // 0312d005ca1501b1603c3b00412eefe27c6b20a74c29377263b357b3aff12de6fa
+                .arg("--rng-seed")
+                .arg("1337")
+                .arg("emulate")
+                .arg(card_type.to_string())
+                .arg("--pipe")
+                .arg(pipe_path.to_str().unwrap())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            if no_init {
+                command.arg("--no-init");
+            }
+            let child = command.spawn()?;
+
+            // wait for emulator to start
+            sleep(Duration::from_millis(500));
+            Ok(EcardSubprocess { child })
+        }
+    }
+
+    impl Drop for EcardSubprocess {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
 
     #[tokio::test]
     pub async fn test_transmit() {
-        let emulator = find_emulator().await.unwrap();
+        let pipe_path = Path::new("/tmp/test-transmit-pipe");
+        let _python = EcardSubprocess::new(pipe_path, &CardTypeOption::SatsCard, false).unwrap();
+        let emulator = find_emulator(pipe_path).await.unwrap();
         dbg!(emulator);
     }
 }

@@ -15,6 +15,7 @@ pub mod emulator;
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
 pub mod sats_card;
+pub mod sats_chip;
 pub mod tap_signer;
 
 pub type TapSigner<T> = tap_signer::TapSigner<T>;
@@ -23,10 +24,11 @@ pub type SatsCard<T> = sats_card::SatsCard<T>;
 pub enum CkTapCard<T: CkTransport> {
     SatsCard(SatsCard<T>),
     TapSigner(TapSigner<T>),
-    SatsChip(TapSigner<T>),
+    SatsChip(SatsChip<T>),
 }
 
 // re-export
+use crate::sats_chip::SatsChip;
 pub use apdu::Error;
 
 impl<T: CkTransport> core::fmt::Debug for CkTapCard<T> {

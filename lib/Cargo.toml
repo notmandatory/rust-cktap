@@ -29,6 +29,10 @@ log = "0.4"
 # pcsc as optional
 pcsc = { version = "2", optional = true }
 
+[dev-dependencies]
+
+tokio = { version = "1.44", features = ["rt"] }
+
 [features]
 default = []
 emulator = []

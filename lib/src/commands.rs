@@ -10,6 +10,7 @@ use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, SecretKey};
 
 use std::convert::TryFrom;
 
+use crate::sats_chip::SatsChip;
 use std::fmt::Debug;
 use std::future::Future;
 
@@ -79,8 +80,8 @@ pub trait CkTransport: Sized {
                     Ok(CkTapCard::TapSigner(tap_signer))
                 }
                 (Some(true), Some(true)) => {
-                    let tap_signer = TapSigner::try_from_status(self, status_response)?;
-                    Ok(CkTapCard::TapSigner(tap_signer))
+                    let sats_chip = SatsChip::try_from_status(self, status_response)?;
+                    Ok(CkTapCard::SatsChip(sats_chip))
                 }
                 (None, None) => {
                     let sats_card = SatsCard::from_status(self, status_response)?;
@@ -264,42 +265,60 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     use crate::emulator::find_emulator;
+    use crate::emulator::test::{CardTypeOption, EcardSubprocess};
     use crate::emulator::CVC;
     use crate::rand_chaincode;
+    use crate::tap_signer::TapSignerShared;
 
     #[tokio::test]
     async fn test_new_command() {
         let rng = &mut rand::thread_rng();
         let chain_code = rand_chaincode(rng);
-
-        let emulator = find_emulator().await.unwrap();
-        match emulator {
-            CkTapCard::SatsCard(mut sc) => {
-                let current_slot = sc.slots.0;
-                let response = sc.unseal(current_slot, CVC).await;
-                assert!(response.is_ok());
-                let response = sc.new_slot(current_slot + 1, Some(chain_code), CVC).await;
-                assert!(response.is_ok());
-                assert_eq!(sc.slots.0, current_slot + 1);
-                // test with no new chain_code
-                let current_slot = sc.slots.0;
-                let response = sc.unseal(current_slot, CVC).await;
-                assert!(response.is_ok());
-                let response = sc.new_slot(current_slot + 1, None, CVC).await;
-                assert!(response.is_ok());
-                assert_eq!(sc.slots.0, current_slot + 1);
-            }
-            CkTapCard::TapSigner(mut ts) => {
-                let response = ts.init(chain_code, CVC).await;
-                assert!(response.is_ok())
-            }
-            CkTapCard::SatsChip(mut sc) => {
-                let response = sc.init(chain_code, CVC).await;
-                assert!(response.is_ok())
-            }
-        };
+        for card_type in [
+            CardTypeOption::SatsCard,
+            CardTypeOption::TapSigner,
+            CardTypeOption::SatsChip,
+        ] {
+            let pipe_path = format!("/tmp/test-new-command-pipe{card_type}");
+            let pipe_path = Path::new(&pipe_path);
+            // Only SatsCard is expected to be initialized
+            let no_init = card_type != CardTypeOption::SatsCard;
+            let python = EcardSubprocess::new(pipe_path, &card_type, no_init).unwrap();
+            let emulator = find_emulator(pipe_path).await.unwrap();
+            match emulator {
+                CkTapCard::SatsCard(mut sc) => {
+                    assert_eq!(card_type, CardTypeOption::SatsCard);
+                    let current_slot = sc.slots.0;
+                    let response = sc.unseal(current_slot, CVC).await;
+                    assert!(response.is_ok());
+                    let response = sc.new_slot(current_slot + 1, Some(chain_code), CVC).await;
+                    assert!(response.is_ok());
+                    assert_eq!(sc.slots.0, current_slot + 1);
+                    // test with no new chain_code
+                    let current_slot = sc.slots.0;
+                    let response = sc.unseal(current_slot, CVC).await;
+                    assert!(response.is_ok());
+                    let response = sc.new_slot(current_slot + 1, None, CVC).await;
+                    assert!(response.is_ok());
+                    assert_eq!(sc.slots.0, current_slot + 1);
+                }
+                CkTapCard::TapSigner(mut ts) => {
+                    assert_eq!(card_type, CardTypeOption::TapSigner);
+                    let response = ts.init(chain_code, CVC).await;
+                    dbg!(&response);
+                    assert!(response.is_ok())
+                }
+                CkTapCard::SatsChip(mut sc) => {
+                    assert_eq!(card_type, CardTypeOption::SatsChip);
+                    let response = sc.init(chain_code, CVC).await;
+                    assert!(response.is_ok())
+                }
+            };
+            drop(python);
+        }
     }
 
     // #[test]
