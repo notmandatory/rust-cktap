@@ -12,6 +12,7 @@ use rust_cktap::tap_signer::TapSignerShared;
 use rust_cktap::{apdu::Error, commands::Certificate, rand_chaincode, CkTapCard};
 use std::io;
 use std::io::Write;
+#[cfg(feature = "emulator")]
 use std::path::Path;
 
 /// SatsCard CLI

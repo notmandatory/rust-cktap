@@ -7,6 +7,7 @@ use rust_cktap::{pcsc, rand_chaincode, CkTapCard};
 use bitcoin::secp256k1::rand;
 use std::io;
 use std::io::Write;
+use rust_cktap::tap_signer::TapSignerShared;
 
 fn get_cvc() -> String {
     print!("Enter cvc: ");

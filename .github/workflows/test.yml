@@ -12,8 +12,8 @@ name: CI
 
 jobs:
 
-  build_test:
-    name: Build and test
+  build:
+    name: Build workspace
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -24,6 +24,7 @@ jobs:
         features:
           - --no-default-features
           - --features default
+          - --all-features
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -35,15 +36,51 @@ jobs:
           profile: minimal
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.2.1
-      - name: Install libpcsclite-dev
-        run: sudo apt install libpcsclite-dev
+      - name: Install PCSC development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcsclite-dev swig
       - name: Use MSRV Cargo.toml # Don't include "cli" in workspace if using MSRV
         if: ${{ matrix.rust.msrv }}
         run: cp Cargo.toml.MSRV Cargo.toml
       - name: Build
         run: cargo build ${{ matrix.features }}
+
+  test:
+    name: Test with emulator
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - version: stable
+          - version: 1.81.0 # MSRV
+            msrv: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          submodules: 'true'
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust.version }}
+          override: true
+          profile: minimal
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.2.1
+      - name: Use MSRV Cargo.toml # Don't include "cli" in workspace if using MSRV
+        if: ${{ matrix.rust.msrv }}
+        run: cp Cargo.toml.MSRV Cargo.toml
+      - name: Install PCSC development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcsclite-dev swig
       - name: Test
-        run: cargo test ${{ matrix.features }}
+        run: |
+          python3 -m venv emulator_env
+          source emulator_env/bin/activate
+          pip install -r coinkite/coinkite-tap-proto/emulator/requirements.txt
+          cargo test -p rust-cktap --features emulator
 
   rust_fmt:
     name: Rust fmt
@@ -54,12 +91,12 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
           override: true
           profile: minimal
           components: rustfmt
       - name: Check fmt
-        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
+        run: cargo +nightly fmt --all
 
   clippy_check:
     name: Clippy check
