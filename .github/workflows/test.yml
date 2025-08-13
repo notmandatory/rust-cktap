@@ -19,7 +19,7 @@ jobs:
       matrix:
         rust:
           - version: stable
-          - version: 1.81.0 # MSRV
+          - version: 1.85.0 # MSRV
             msrv: true
         features:
           - --no-default-features
@@ -53,7 +53,7 @@ jobs:
       matrix:
         rust:
           - version: stable
-          - version: 1.81.0 # MSRV
+          - version: 1.85.0 # MSRV
             msrv: true
     steps:
       - name: checkout
