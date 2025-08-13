@@ -24,8 +24,8 @@ impl TryFrom<PublicKey> for FactoryRootKey {
         match pubkey.serialize().to_lower_hex_string().as_str() {
             PUB_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Pub(pubkey)),
             DEV_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Dev(pubkey)),
-            _ => Err(Error::IncorrectSignature(
-                "Root cert is not from Coinkite. Card is counterfeit.".to_string(),
+            _ => Err(Error::InvalidRootCert(
+                pubkey.serialize().to_lower_hex_string(),
             )),
         }
     }

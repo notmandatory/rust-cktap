@@ -277,16 +277,10 @@ mod tests {
     async fn test_new_command() {
         let rng = &mut rand::thread_rng();
         let chain_code = rand_chaincode(rng);
-        for card_type in [
-            CardTypeOption::SatsCard,
-            CardTypeOption::TapSigner,
-            CardTypeOption::SatsChip,
-        ] {
+        for card_type in CardTypeOption::values() {
             let pipe_path = format!("/tmp/test-new-command-pipe{card_type}");
             let pipe_path = Path::new(&pipe_path);
-            // Only SatsCard is expected to be initialized
-            let no_init = card_type != CardTypeOption::SatsCard;
-            let python = EcardSubprocess::new(pipe_path, &card_type, no_init).unwrap();
+            let python = EcardSubprocess::new(pipe_path, &card_type).unwrap();
             let emulator = find_emulator(pipe_path).await.unwrap();
             match emulator {
                 CkTapCard::SatsCard(mut sc) => {
@@ -315,6 +309,39 @@ mod tests {
                     assert_eq!(card_type, CardTypeOption::SatsChip);
                     let response = sc.init(chain_code, CVC).await;
                     assert!(response.is_ok())
+                }
+            };
+            drop(python);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cert_command() {
+        for card_type in CardTypeOption::values() {
+            let emulator_root_pubkey =
+                "0312d005ca1501b1603c3b00412eefe27c6b20a74c29377263b357b3aff12de6fa".to_string();
+            let pipe_path = format!("/tmp/test-cert-command-pipe{card_type}");
+            let pipe_path = Path::new(&pipe_path);
+            let python = EcardSubprocess::new(pipe_path, &card_type).unwrap();
+            let emulator = find_emulator(pipe_path).await.unwrap();
+            match emulator {
+                CkTapCard::SatsCard(mut sc) => {
+                    assert_eq!(card_type, CardTypeOption::SatsCard);
+                    let response = sc.check_certificate().await;
+                    assert!(response.is_err());
+                    matches!(response, Err(Error::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
+                }
+                CkTapCard::TapSigner(mut ts) => {
+                    assert_eq!(card_type, CardTypeOption::TapSigner);
+                    let response = ts.check_certificate().await;
+                    assert!(response.is_err());
+                    matches!(response, Err(Error::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
+                }
+                CkTapCard::SatsChip(mut sc) => {
+                    assert_eq!(card_type, CardTypeOption::SatsChip);
+                    let response = sc.check_certificate().await;
+                    assert!(response.is_err());
+                    matches!(response, Err(Error::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
                 }
             };
             drop(python);

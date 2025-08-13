@@ -1,7 +1,4 @@
-use bitcoin::secp256k1::{
-    hashes::{sha256, Hash as _},
-    All, Message, PublicKey, Secp256k1,
-};
+use bitcoin::secp256k1::{All, PublicKey, Secp256k1};
 
 use crate::apdu::{Error, StatusResponse};
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
@@ -28,6 +25,10 @@ pub struct SatsChip<T: CkTransport> {
 impl<T: CkTransport> Authentication<T> for SatsChip<T> {
     fn secp(&self) -> &Secp256k1<All> {
         &self.secp
+    }
+
+    fn ver(&self) -> &str {
+        &self.ver
     }
 
     fn pubkey(&self) -> &PublicKey {
@@ -90,14 +91,8 @@ impl<T: CkTransport> Read<T> for SatsChip<T> {
 }
 
 impl<T: CkTransport> Certificate<T> for SatsChip<T> {
-    fn message_digest(&mut self, card_nonce: [u8; 16], app_nonce: [u8; 16]) -> Message {
-        let mut message_bytes: Vec<u8> = Vec::new();
-        message_bytes.extend("OPENDIME".as_bytes());
-        message_bytes.extend(card_nonce);
-        message_bytes.extend(app_nonce);
-
-        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
-        Message::from_digest(message_bytes_hash.to_byte_array())
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
+        Ok(None)
     }
 }
 

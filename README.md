@@ -43,10 +43,8 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 
 ### Automated Testing with Emulator
 
-1. Install and start [cktap emulator](https://github.com/coinkite/coinkite-tap-proto/blob/master/emulator/README.md)
-   - TapSigner: `./ecard.py emulate -t --no-init`
-   - SatsCard: `./ecard.py emulate -s`
-2. run tests: `cargo test --features emulator`
+1. Install dependencies for [cktap emulator](https://github.com/coinkite/coinkite-tap-proto/blob/master/emulator/README.md)
+2. run tests with emulator: `just test`
 
 ### Manual Testing with real cards
 

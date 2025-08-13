@@ -67,6 +67,16 @@ pub mod test {
         SatsChip,
     }
 
+    impl CardTypeOption {
+        pub fn values() -> [CardTypeOption; 3] {
+            [
+                CardTypeOption::SatsCard,
+                CardTypeOption::TapSigner,
+                CardTypeOption::SatsChip,
+            ]
+        }
+    }
+
     impl Display for CardTypeOption {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let str = match self {
@@ -82,8 +92,10 @@ pub mod test {
         pub fn new(
             pipe_path: &Path,
             card_type: &CardTypeOption,
-            no_init: bool,
         ) -> Result<Self, Box<dyn std::error::Error>> {
+            // Only SatsCard is expected to be initialized
+            let no_init = *card_type != CardTypeOption::SatsCard;
+
             // execute ecard.py python script
             let mut command = Command::new("python3");
             command
@@ -100,6 +112,7 @@ pub mod test {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
             if no_init {
+                // Do not initialize the first slot of card
                 command.arg("--no-init");
             }
             let child = command.spawn()?;
@@ -120,7 +133,7 @@ pub mod test {
     #[tokio::test]
     pub async fn test_transmit() {
         let pipe_path = Path::new("/tmp/test-transmit-pipe");
-        let _python = EcardSubprocess::new(pipe_path, &CardTypeOption::SatsCard, false).unwrap();
+        let _python = EcardSubprocess::new(pipe_path, &CardTypeOption::SatsCard).unwrap();
         let emulator = find_emulator(pipe_path).await.unwrap();
         dbg!(emulator);
     }

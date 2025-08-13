@@ -18,7 +18,7 @@ build: fmt
     cargo build --all-features --tests
 
 # test the rust-cktap lib with the coinkite cktap card emulator
-test-lib:
+test: fmt
     (test -d emulator_env || python3 -m venv emulator_env) && source emulator_env/bin/activate && pip install -r {{emulator_dir}}/requirements.txt
     source emulator_env/bin/activate && cargo test -p rust-cktap --features emulator
 

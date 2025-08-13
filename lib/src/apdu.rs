@@ -28,6 +28,8 @@ pub enum Error {
     CkTap(CkTapError),
     #[error("IncorrectSignature: {0}")]
     IncorrectSignature(String),
+    #[error("Root cert is not from Coinkite. Card is counterfeit: {0}")]
+    InvalidRootCert(String),
     #[error("UnknownCardType: {0}")]
     UnknownCardType(String),
 
