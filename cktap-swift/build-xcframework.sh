@@ -49,7 +49,7 @@ cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target aarch64-apple
 cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target aarch64-apple-ios
 
 # Then run uniffi-bindgen
-cargo run --package ${FFI_PKG_NAME} --bin uniffi-bindgen generate \
+cargo run --package ${FFI_PKG_NAME} --bin cktap-uniffi-bindgen generate \
     --library target/aarch64-apple-ios/${RELDIR}/${DYLIB_FILENAME} \
     --language swift \
     --out-dir cktap-swift/Sources/CKTap \
