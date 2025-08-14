@@ -1,14 +1,14 @@
-use bitcoin::hashes::{Hash as _, sha256};
 use bitcoin::key::CompressedPublicKey as BitcoinPublicKey;
 use bitcoin::secp256k1::{All, Message, PublicKey, Secp256k1, ecdsa::Signature};
 use bitcoin::{Address, Network};
+use bitcoin_hashes::sha256;
 
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, Error, NewCommand,
     NewResponse, StatusResponse, UnsealCommand, UnsealResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
-use crate::secp256k1::hashes::hex::DisplayHex;
+use bitcoin_hashes::hex::DisplayHex;
 
 pub struct SatsCard<T: CkTransport> {
     pub transport: T,

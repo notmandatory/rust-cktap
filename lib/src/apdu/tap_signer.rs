@@ -2,7 +2,8 @@ use core::fmt::{self, Formatter};
 
 use super::{CommandApdu, ResponseApdu};
 
-use bitcoin::secp256k1::{PublicKey, hashes::hex::DisplayHex as _};
+use bitcoin::secp256k1::PublicKey;
+use bitcoin_hashes::hex::DisplayHex as _;
 use serde::{Deserialize, Serialize};
 
 // MARK: - XpubCommand

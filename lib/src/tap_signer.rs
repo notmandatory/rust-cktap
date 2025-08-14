@@ -1,9 +1,6 @@
 use bitcoin::hex::DisplayHex;
-use bitcoin::secp256k1::{
-    self, All, Message, PublicKey, Secp256k1,
-    ecdsa::Signature,
-    hashes::{Hash as _, sha256},
-};
+use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, ecdsa::Signature};
+use bitcoin_hashes::sha256;
 use log::error;
 use std::future::Future;
 

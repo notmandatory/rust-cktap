@@ -4,8 +4,8 @@ pub mod tap_signer;
 
 use bitcoin::secp256k1::{
     self, PublicKey, SecretKey, XOnlyPublicKey, ecdh::SharedSecret, ecdsa::Signature,
-    hashes::hex::DisplayHex,
 };
+use bitcoin_hashes::hex::DisplayHex;
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
@@ -514,7 +514,7 @@ impl CheckCommand {
 }
 
 /// Check Certs Response
-/// ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#certs
+/// ref: [certs](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#certs)
 #[derive(Deserialize, Clone)]
 pub struct CheckResponse {
     /// signature using card_pubkey, 64 bytes

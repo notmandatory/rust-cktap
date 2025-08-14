@@ -5,8 +5,8 @@ use crate::{apdu::*, rand_nonce};
 use bitcoin::key::rand;
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
-use bitcoin::secp256k1::hashes::{Hash, sha256};
 use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, SecretKey};
+use bitcoin_hashes::sha256;
 
 use std::convert::TryFrom;
 
@@ -14,7 +14,7 @@ use crate::sats_chip::SatsChip;
 use std::fmt::Debug;
 use std::future::Future;
 
-// Helper functions for authenticated commands.
+/// Helper functions for authenticated commands.
 pub trait Authentication<T: CkTransport> {
     fn secp(&self) -> &Secp256k1<All>;
     fn ver(&self) -> &str;
@@ -26,6 +26,8 @@ pub trait Authentication<T: CkTransport> {
 
     fn transport(&self) -> &T;
 
+    /// Calculate ephemeral key pair and XOR'd CVC
+    /// ref: ["Authenticating Commands with CVC"](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#authenticating-commands-with-cvc)
     fn calc_ekeys_xcvc(&self, cvc: &str, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
         let secp = Self::secp(self);
         let pubkey = Self::pubkey(self);
@@ -52,6 +54,7 @@ pub trait Authentication<T: CkTransport> {
     }
 }
 
+/// Helper functions for communicating with cktap cards.
 pub trait CkTransport: Sized {
     fn transmit<C, R>(&self, command: &C) -> impl Future<Output = Result<R, Error>>
     where
@@ -93,7 +96,9 @@ pub trait CkTransport: Sized {
     }
 }
 
-// card traits
+/// Command to read and authenticate the cktap card's public key.
+/// SatsCard does not require a CVC but TapSigner and SatsChip do.
+/// ref: [read](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#read)
 pub trait Read<T>: Authentication<T>
 where
     T: CkTransport,
@@ -107,8 +112,8 @@ where
             let app_nonce = rand_nonce();
 
             let (cmd, session_key) = if self.requires_auth() {
-                let (eprivkey, epubkey, xcvc) = self
-                    .calc_ekeys_xcvc(cvc.as_ref().expect("cvc is required"), ReadCommand::name());
+                let cvc = cvc.ok_or(Error::CkTap(CkTapError::NeedsAuth))?;
+                let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, ReadCommand::name());
                 (
                     ReadCommand::authenticated(app_nonce, epubkey, xcvc),
                     Some(SharedSecret::new(self.pubkey(), &eprivkey)),

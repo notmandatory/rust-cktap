@@ -13,6 +13,7 @@ pub use bitcoin::{
     key::UntweakedPublicKey,
     secp256k1::{self, rand},
 };
+pub use bitcoin_hashes;
 
 #[cfg(feature = "emulator")]
 pub mod emulator;

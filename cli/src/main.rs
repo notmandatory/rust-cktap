@@ -6,7 +6,6 @@ use rust_cktap::commands::{Authentication, CkTransport, Read, Wait};
 use rust_cktap::emulator;
 #[cfg(not(feature = "emulator"))]
 use rust_cktap::pcsc;
-use rust_cktap::secp256k1::hashes::Hash as _;
 use rust_cktap::secp256k1::rand;
 use rust_cktap::tap_signer::TapSignerShared;
 use rust_cktap::{CkTapCard, apdu::Error, commands::Certificate, rand_chaincode};
@@ -182,7 +181,7 @@ async fn main() -> Result<(), Error> {
                 }
                 TapSignerCommand::Sign { to_sign } => {
                     let digest: [u8; 32] =
-                        rust_cktap::secp256k1::hashes::sha256::Hash::hash(to_sign.as_bytes())
+                        rust_cktap::bitcoin_hashes::sha256::Hash::hash(to_sign.as_bytes())
                             .to_byte_array();
 
                     let response = &ts.sign(digest, vec![], &cvc()).await;
@@ -214,7 +213,7 @@ async fn main() -> Result<(), Error> {
                 }
                 SatsChipCommand::Sign { to_sign } => {
                     let digest: [u8; 32] =
-                        rust_cktap::secp256k1::hashes::sha256::Hash::hash(to_sign.as_bytes())
+                        rust_cktap::bitcoin_hashes::sha256::Hash::hash(to_sign.as_bytes())
                             .to_byte_array();
 
                     let response = &sc.sign(digest, vec![], &cvc()).await;
