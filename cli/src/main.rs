@@ -1,7 +1,7 @@
 /// CLI for rust-cktap
 use clap::{Parser, Subcommand};
 use rpassword::read_password;
-use rust_cktap::commands::{Authentication, CkTransport, Read, Wait};
+use rust_cktap::commands::{Authentication, Read, Wait};
 #[cfg(feature = "emulator")]
 use rust_cktap::emulator;
 #[cfg(not(feature = "emulator"))]
@@ -27,7 +27,7 @@ struct SatsCardCli {
 #[derive(Subcommand)]
 enum SatsCardCommand {
     /// Show the card status
-    Debug,
+    Status,
     /// Show current deposit address
     Address,
     /// Check this card was made by Coinkite: Verifies a certificate chain up to root factory key.
@@ -57,7 +57,7 @@ struct TapSignerCli {
 #[derive(Subcommand)]
 enum TapSignerCommand {
     /// Show the card status
-    Debug,
+    Status,
     /// Check this card was made by Coinkite: Verifies a certificate chain up to root factory key.
     Certs,
     /// Read the pubkey (requires CVC)
@@ -93,7 +93,7 @@ struct SatsChipCli {
 #[derive(Subcommand)]
 enum SatsChipCommand {
     /// Show the card status
-    Debug,
+    Status,
     /// Check this card was made by Coinkite: Verifies a certificate chain up to root factory key.
     Certs,
     /// Read the pubkey (requires CVC)
@@ -130,7 +130,7 @@ async fn main() -> Result<(), Error> {
         CkTapCard::SatsCard(sc) => {
             let cli = SatsCardCli::parse();
             match cli.command {
-                SatsCardCommand::Debug => {
+                SatsCardCommand::Status => {
                     dbg!(&sc);
                 }
                 SatsCardCommand::Address => println!("Address: {}", sc.address().await.unwrap()),
@@ -139,13 +139,13 @@ async fn main() -> Result<(), Error> {
                 SatsCardCommand::New => {
                     let slot = sc.slot().expect("current slot number");
                     let chain_code = Some(rand_chaincode(rng));
-                    let response = &sc.new_slot(slot, chain_code, &cvc()).await.unwrap();
+                    let response = &sc.new_slot(slot, chain_code, &cvc()).await?;
                     println!("{response}")
                 }
                 SatsCardCommand::Unseal => {
                     let slot = sc.slot().expect("current slot number");
-                    let response = &sc.unseal(slot, &cvc()).await.unwrap();
-                    println!("{response}")
+                    let (privkey, pubkey) = &sc.unseal(slot, &cvc()).await?;
+                    println!("privkey: {}, pubkey: {pubkey}", privkey.display_secret())
                 }
                 SatsCardCommand::Derive => {
                     dbg!(&sc.derive().await);
@@ -156,7 +156,7 @@ async fn main() -> Result<(), Error> {
         CkTapCard::TapSigner(ts) => {
             let cli = TapSignerCli::parse();
             match cli.command {
-                TapSignerCommand::Debug => {
+                TapSignerCommand::Status => {
                     dbg!(&ts);
                 }
                 TapSignerCommand::Certs => check_cert(ts).await,
@@ -193,7 +193,7 @@ async fn main() -> Result<(), Error> {
         CkTapCard::SatsChip(sc) => {
             let cli = SatsChipCli::parse();
             match cli.command {
-                SatsChipCommand::Debug => {
+                SatsChipCommand::Status => {
                     dbg!(&sc);
                 }
                 SatsChipCommand::Certs => check_cert(sc).await,
@@ -229,9 +229,9 @@ async fn main() -> Result<(), Error> {
 
 // handler functions for each command
 
-async fn check_cert<C, T: CkTransport>(card: &mut C)
+async fn check_cert<C>(card: &mut C)
 where
-    C: Certificate<T>,
+    C: Certificate + Send,
 {
     if let Ok(k) = card.check_certificate().await {
         println!(
@@ -243,9 +243,9 @@ where
     }
 }
 
-async fn read<C, T: CkTransport>(card: &mut C, cvc: Option<String>)
+async fn read<C>(card: &mut C, cvc: Option<String>)
 where
-    C: Read<T>,
+    C: Read + Send,
 {
     match card.read(cvc).await {
         Ok(resp) => println!("{resp}"),
@@ -263,9 +263,9 @@ fn cvc() -> String {
     cvc.trim().to_string()
 }
 
-async fn wait<C, T: CkTransport>(card: &mut C)
+async fn wait<C>(card: &mut C)
 where
-    C: Authentication<T> + Wait<T>,
+    C: Authentication + Wait + Send,
 {
     // if auth delay call wait
     if card.auth_delay().is_some() {

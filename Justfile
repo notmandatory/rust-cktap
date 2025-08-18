@@ -25,3 +25,7 @@ test: fmt
 # clean the project target directory
 clean:
     cargo clean
+
+# run the cli locally with a usb pcsc card reader (HID OMNIKEY 5022 CL Rev:C)
+run *CMD:
+    cargo run -p cktap-cli {{CMD}}

@@ -5,17 +5,18 @@ use crate::{apdu::*, rand_nonce};
 use bitcoin::key::rand;
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
-use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, SecretKey};
+use bitcoin::secp256k1::{All, Message, PublicKey, Secp256k1, SecretKey};
 use bitcoin_hashes::sha256;
 
 use std::convert::TryFrom;
 
 use crate::sats_chip::SatsChip;
+use async_trait::async_trait;
 use std::fmt::Debug;
-use std::future::Future;
+use std::sync::Arc;
 
 /// Helper functions for authenticated commands.
-pub trait Authentication<T: CkTransport> {
+pub trait Authentication {
     fn secp(&self) -> &Secp256k1<All>;
     fn ver(&self) -> &str;
     fn pubkey(&self) -> &PublicKey;
@@ -23,10 +24,9 @@ pub trait Authentication<T: CkTransport> {
     fn set_card_nonce(&mut self, new_nonce: [u8; 16]);
     fn auth_delay(&self) -> &Option<usize>;
     fn set_auth_delay(&mut self, auth_delay: Option<usize>);
+    fn transport(&self) -> Arc<dyn CkTransport>;
 
-    fn transport(&self) -> &T;
-
-    /// Calculate ephemeral key pair and XOR'd CVC
+    /// Calculate ephemeral key pair and XOR'd CVC.
     /// ref: ["Authenticating Commands with CVC"](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#authenticating-commands-with-cvc)
     fn calc_ekeys_xcvc(&self, cvc: &str, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
         let secp = Self::secp(self);
@@ -54,214 +54,189 @@ pub trait Authentication<T: CkTransport> {
     }
 }
 
-/// Helper functions for communicating with cktap cards.
-pub trait CkTransport: Sized {
-    fn transmit<C, R>(&self, command: &C) -> impl Future<Output = Result<R, Error>>
-    where
-        C: CommandApdu + serde::Serialize + Debug,
-        R: ResponseApdu + serde::de::DeserializeOwned + Debug,
-    {
-        async move {
-            let command_apdu = command.apdu_bytes();
-            let rapdu = self.transmit_apdu(command_apdu).await?;
-            let response = R::from_cbor(rapdu.to_vec())?;
-            Ok(response)
-        }
-    }
-    fn transmit_apdu(&self, command_apdu: Vec<u8>) -> impl Future<Output = Result<Vec<u8>, Error>>;
+/// Trait for exchanging APDU data with cktap cards.
+#[async_trait]
+pub trait CkTransport: Sync + Send {
+    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error>;
+}
 
-    fn to_cktap(self) -> impl Future<Output = Result<CkTapCard<Self>, Error>> {
-        async {
-            // Get status from card
-            let cmd = AppletSelect::default();
-            let status_response: StatusResponse = self.transmit(&cmd).await?;
+/// Helper function for serialize APDU commands, transmit them and deserialize responses.
+pub(crate) async fn transmit<C, R>(transport: Arc<dyn CkTransport>, command: &C) -> Result<R, Error>
+where
+    C: CommandApdu + serde::Serialize + Debug + Send + Sync,
+    R: ResponseApdu + serde::de::DeserializeOwned + Debug + Send,
+{
+    let command_apdu = command.apdu_bytes();
+    let rapdu = transport.transmit_apdu(command_apdu).await?;
+    let response = R::from_cbor(rapdu.to_vec())?;
+    Ok(response)
+}
 
-            // Return correct card variant using status
-            match (status_response.tapsigner, status_response.satschip) {
-                (Some(true), None) => {
-                    let tap_signer = TapSigner::try_from_status(self, status_response)?;
-                    Ok(CkTapCard::TapSigner(tap_signer))
-                }
-                (Some(true), Some(true)) => {
-                    let sats_chip = SatsChip::try_from_status(self, status_response)?;
-                    Ok(CkTapCard::SatsChip(sats_chip))
-                }
-                (None, None) => {
-                    let sats_card = SatsCard::from_status(self, status_response)?;
-                    Ok(CkTapCard::SatsCard(sats_card))
-                }
-                (_, _) => Err(Error::UnknownCardType("Card not recognized.".to_string())),
-            }
+pub async fn to_cktap(transport: Arc<dyn CkTransport>) -> Result<CkTapCard, Error> {
+    // Get status from card
+    let cmd = AppletSelect::default();
+    let status_response: StatusResponse = transmit(transport.clone(), &cmd).await?;
+
+    // Return correct card variant using status
+    match (status_response.tapsigner, status_response.satschip) {
+        (Some(true), None) => {
+            let tap_signer = TapSigner::try_from_status(transport, status_response)?;
+            Ok(CkTapCard::TapSigner(tap_signer))
         }
+        (Some(true), Some(true)) => {
+            let sats_chip = SatsChip::try_from_status(transport, status_response)?;
+            Ok(CkTapCard::SatsChip(sats_chip))
+        }
+        (None, None) => {
+            let sats_card = SatsCard::from_status(transport, status_response)?;
+            Ok(CkTapCard::SatsCard(sats_card))
+        }
+        (_, _) => Err(Error::UnknownCardType("Card not recognized.".to_string())),
     }
 }
 
 /// Command to read and authenticate the cktap card's public key.
 /// SatsCard does not require a CVC but TapSigner and SatsChip do.
 /// ref: [read](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#read)
-pub trait Read<T>: Authentication<T>
-where
-    T: CkTransport,
-{
+#[async_trait]
+pub trait Read: Authentication {
     fn requires_auth(&self) -> bool;
+
     fn slot(&self) -> Option<u8>;
 
-    fn read(&mut self, cvc: Option<String>) -> impl Future<Output = Result<ReadResponse, Error>> {
-        async move {
-            let card_nonce = *self.card_nonce();
-            let app_nonce = rand_nonce();
+    async fn read(&mut self, cvc: Option<String>) -> Result<PublicKey, Error> {
+        let card_nonce = *self.card_nonce();
+        let app_nonce = rand_nonce();
 
-            let (cmd, session_key) = if self.requires_auth() {
-                let cvc = cvc.ok_or(Error::CkTap(CkTapError::NeedsAuth))?;
-                let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, ReadCommand::name());
-                (
-                    ReadCommand::authenticated(app_nonce, epubkey, xcvc),
-                    Some(SharedSecret::new(self.pubkey(), &eprivkey)),
-                )
-            } else {
-                (ReadCommand::unauthenticated(app_nonce), None)
-            };
-
-            let read_response: ReadResponse = self.transport().transmit(&cmd).await?;
-
-            self.secp().verify_ecdsa(
-                &self.message_digest(card_nonce, app_nonce.to_vec()),
-                &read_response.signature()?, // or add 'from' trait: Signature::from(response.sig: )
-                &read_response.pubkey(session_key)?,
-            )?;
-
-            self.set_card_nonce(read_response.card_nonce);
-
-            Ok(read_response)
-        }
-    }
-
-    fn message_digest(&self, card_nonce: [u8; 16], app_nonce: Vec<u8>) -> Message {
+        // create the message digest
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
         message_bytes.extend(app_nonce);
-
         if let Some(slot) = self.slot() {
             message_bytes.push(slot);
         } else {
             message_bytes.push(0);
         }
-
         let hash = sha256::Hash::hash(message_bytes.as_slice());
-        Message::from_digest(hash.to_byte_array())
+        let message_digest = Message::from_digest(hash.to_byte_array());
+
+        // create the read command
+        let (cmd, session_key) = if self.requires_auth() {
+            let cvc = cvc.ok_or(Error::CkTap(CkTapError::NeedsAuth))?;
+            let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, ReadCommand::name());
+            (
+                ReadCommand::authenticated(app_nonce, epubkey, xcvc),
+                Some(SharedSecret::new(self.pubkey(), &eprivkey)),
+            )
+        } else {
+            (ReadCommand::unauthenticated(app_nonce), None)
+        };
+
+        // send the read command to the card
+        let read_response: ReadResponse = transmit(self.transport(), &cmd).await?;
+
+        // convert the response to a PublicKey
+        let pubkey = read_response.pubkey(session_key)?;
+        self.secp().verify_ecdsa(
+            &message_digest,
+            &read_response.signature()?, // or add 'from' trait: Signature::from(response.sig: )
+            &pubkey,
+        )?;
+
+        // update the card nonce
+        self.set_card_nonce(read_response.card_nonce);
+
+        Ok(pubkey)
     }
 }
 
-pub trait Wait<T>: Authentication<T>
-where
-    T: CkTransport,
-{
-    fn wait(&mut self, cvc: Option<String>) -> impl Future<Output = Result<WaitResponse, Error>> {
-        async move {
-            let epubkey_xcvc = cvc.map(|cvc| {
-                let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, WaitCommand::name());
-                (epubkey, xcvc)
-            });
+#[async_trait]
+pub trait Wait: Authentication {
+    async fn wait(&mut self, cvc: Option<String>) -> Result<Option<usize>, Error> {
+        let epubkey_xcvc = cvc.map(|cvc| {
+            let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, WaitCommand::name());
+            (epubkey, xcvc)
+        });
 
-            let (epubkey, xcvc) = epubkey_xcvc
-                .map(|(epubkey, xcvc)| (Some(epubkey.serialize()), Some(xcvc)))
-                .unwrap_or((None, None));
+        let (epubkey, xcvc) = epubkey_xcvc
+            .map(|(epubkey, xcvc)| (Some(epubkey.serialize()), Some(xcvc)))
+            .unwrap_or((None, None));
 
-            let wait_command = WaitCommand::new(epubkey, xcvc);
+        let wait_command = WaitCommand::new(epubkey, xcvc);
 
-            let wait_response: WaitResponse = self.transport().transmit(&wait_command).await?;
-            if wait_response.auth_delay > 0 {
-                self.set_auth_delay(Some(wait_response.auth_delay));
-            } else {
-                self.set_auth_delay(None);
-            }
-
-            Ok(wait_response)
+        let wait_response: WaitResponse = transmit(self.transport(), &wait_command).await?;
+        // TODO throw error if success == false
+        if wait_response.auth_delay > 0 {
+            let auth_delay = Some(wait_response.auth_delay);
+            self.set_auth_delay(auth_delay);
+            Ok(auth_delay)
+        } else {
+            self.set_auth_delay(None);
+            Ok(None)
         }
     }
 }
 
-pub trait Certificate<T>: Read<T>
-where
-    T: CkTransport,
-{
-    fn message_digest_with_slot_pubkey(
-        &self,
-        card_nonce: [u8; 16],
-        app_nonce: [u8; 16],
-        slot_pubkey: Option<PublicKey>,
-    ) -> Message {
+#[async_trait]
+pub trait Certificate: Read {
+    async fn check_certificate(&mut self) -> Result<FactoryRootKey, Error> {
+        let app_nonce = rand_nonce();
+        let card_nonce = *self.card_nonce();
+
+        let certs_cmd = CertsCommand::default();
+        let certs_response: CertsResponse = transmit(self.transport(), &certs_cmd).await?;
+
+        let check_cmd = CheckCommand::new(app_nonce);
+        let check_response: CheckResponse = transmit(self.transport(), &check_cmd).await?;
+        self.set_card_nonce(check_response.card_nonce);
+
+        let slot_pubkey = self.slot_pubkey().await?;
+
+        // create message digest with slot pubkey
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
         message_bytes.extend(app_nonce);
-
         if let Some(pubkey) = slot_pubkey {
             if self.ver() != "0.9.0" {
                 let slot_pubkey_bytes = pubkey.serialize();
                 message_bytes.extend(slot_pubkey_bytes);
             }
         }
-
         let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
-        Message::from_digest(message_bytes_hash.to_byte_array())
-    }
+        let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
-    fn check_certificate(&mut self) -> impl Future<Output = Result<FactoryRootKey, Error>> {
-        async {
-            let nonce = rand_nonce();
-            let card_nonce = *self.card_nonce();
-
-            let certs_cmd = CertsCommand::default();
-            let certs_response: CertsResponse = self.transport().transmit(&certs_cmd).await?;
-
-            let check_cmd = CheckCommand::new(nonce);
-            let check_response: CheckResponse = self.transport().transmit(&check_cmd).await?;
-            self.set_card_nonce(check_response.card_nonce);
-
-            let slot_pubkey = self.slot_pubkey().await?;
-            self.verify_card_signature(check_response.auth_sig, card_nonce, nonce, slot_pubkey)?;
-
-            let mut pubkey = *self.pubkey();
-            for sig in &certs_response.cert_chain() {
-                // BIP-137: https://github.com/bitcoin/bips/blob/master/bip-0137.mediawiki
-                let subtract_by = match sig[0] {
-                    27..=30 => 27, // P2PKH uncompressed
-                    31..=34 => 31, // P2PKH compressed
-                    35..=38 => 35, // Segwit P2SH
-                    39..=42 => 39, // Segwit Bech32
-                    _ => panic!("Unrecognized BIP-137 address"),
-                };
-                let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by)?;
-                let (_, sig) = sig.split_at(1);
-                let result = RecoverableSignature::from_compact(sig, rec_id);
-                let rec_sig = result?;
-                let pubkey_hash = sha256::Hash::hash(&pubkey.serialize());
-                let md = Message::from_digest(pubkey_hash.to_byte_array());
-                let result = self.secp().recover_ecdsa(&md, &rec_sig);
-                pubkey = result?;
-            }
-
-            FactoryRootKey::try_from(pubkey)
-        }
-    }
-
-    fn verify_card_signature(
-        &mut self,
-        signature: Vec<u8>,
-        card_nonce: [u8; 16],
-        app_nonce: [u8; 16],
-        slot_pubkey: Option<PublicKey>,
-    ) -> Result<(), secp256k1::Error> {
-        let message = self.message_digest_with_slot_pubkey(card_nonce, app_nonce, slot_pubkey);
-        let signature = Signature::from_compact(signature.as_slice())
+        // verify the signature with the message and pubkey
+        let signature = Signature::from_compact(check_response.auth_sig.as_slice())
             .expect("Failed to construct ECDSA signature from check response");
         self.secp()
-            .verify_ecdsa(&message, &signature, self.pubkey())
+            .verify_ecdsa(&message, &signature, self.pubkey())?;
+
+        let mut pubkey = *self.pubkey();
+        for sig in &certs_response.cert_chain() {
+            // BIP-137: https://github.com/bitcoin/bips/blob/master/bip-0137.mediawiki
+            let subtract_by = match sig[0] {
+                27..=30 => 27, // P2PKH uncompressed
+                31..=34 => 31, // P2PKH compressed
+                35..=38 => 35, // Segwit P2SH
+                39..=42 => 39, // Segwit Bech32
+                _ => panic!("Unrecognized BIP-137 address"),
+            };
+            let rec_id = RecoveryId::from_i32((sig[0] as i32) - subtract_by)?;
+            let (_, sig) = sig.split_at(1);
+            let result = RecoverableSignature::from_compact(sig, rec_id);
+            let rec_sig = result?;
+            let pubkey_hash = sha256::Hash::hash(&pubkey.serialize());
+            let md = Message::from_digest(pubkey_hash.to_byte_array());
+            let result = self.secp().recover_ecdsa(&md, &rec_sig);
+            pubkey = result?;
+        }
+
+        FactoryRootKey::try_from(pubkey)
     }
 
-    fn slot_pubkey(&mut self) -> impl Future<Output = Result<Option<PublicKey>, Error>>;
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error>;
 }
 
 #[cfg(feature = "emulator")]

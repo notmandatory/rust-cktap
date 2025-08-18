@@ -17,7 +17,7 @@ GENERATED_MODULEMAP="${FFI_LIB_NAME}FFI.modulemap"
 
 NAME="cktapFFI"
 STATIC_LIB_FILENAME="lib${FFI_LIB_NAME}.a"
-NEW_HEADER_DIR="../target/include"
+NEW_HEADER_DIR="${TARGETDIR}/include"
 
 # set required rust version and install component and targets
 rustup default 1.85.0
@@ -30,11 +30,11 @@ rustup target add x86_64-apple-darwin # mac x86_64
 
 # Create all required directories first
 mkdir -p Sources/CKTap
-mkdir -p ../target/include
-mkdir -p ../target/lipo-macos/release-smaller
-mkdir -p ../target/lipo-ios-sim/release-smaller
+mkdir -p ${TARGETDIR}/include
+mkdir -p ${TARGETDIR}/lipo-macos/${RELDIR}
+mkdir -p ${TARGETDIR}/lipo-ios-sim/${RELDIR}
 
-cd ../ || exit
+#cd ../ || exit
 
 # Target architectures
 # macOS Intel
@@ -50,22 +50,22 @@ cargo build --package ${FFI_PKG_NAME} --profile ${RELDIR} --target aarch64-apple
 
 # Then run uniffi-bindgen
 cargo run --package ${FFI_PKG_NAME} --bin cktap-uniffi-bindgen generate \
-    --library target/aarch64-apple-ios/${RELDIR}/${DYLIB_FILENAME} \
+    --library ${TARGETDIR}/aarch64-apple-ios/${RELDIR}/${DYLIB_FILENAME} \
     --language swift \
-    --out-dir cktap-swift/Sources/CKTap \
+    --out-dir ./Sources/CKTap \
     --no-format
 
 # Create universal library for simulator targets
-lipo target/aarch64-apple-ios-sim/${RELDIR}/${STATIC_LIB_FILENAME} \
-     target/x86_64-apple-ios/${RELDIR}/${STATIC_LIB_FILENAME} \
-     -create -output target/lipo-ios-sim/${RELDIR}/${STATIC_LIB_FILENAME}
+lipo ${TARGETDIR}/aarch64-apple-ios-sim/${RELDIR}/${STATIC_LIB_FILENAME} \
+     ${TARGETDIR}/x86_64-apple-ios/${RELDIR}/${STATIC_LIB_FILENAME} \
+     -create -output ${TARGETDIR}/lipo-ios-sim/${RELDIR}/${STATIC_LIB_FILENAME}
 
 # Create universal library for mac targets
-lipo target/aarch64-apple-darwin/${RELDIR}/${STATIC_LIB_FILENAME} \
-     target/x86_64-apple-darwin/${RELDIR}/${STATIC_LIB_FILENAME} \
-     -create -output target/lipo-macos/${RELDIR}/${STATIC_LIB_FILENAME}
+lipo ${TARGETDIR}/aarch64-apple-darwin/${RELDIR}/${STATIC_LIB_FILENAME} \
+     ${TARGETDIR}/x86_64-apple-darwin/${RELDIR}/${STATIC_LIB_FILENAME} \
+     -create -output ${TARGETDIR}/lipo-macos/${RELDIR}/${STATIC_LIB_FILENAME}
 
-cd cktap-swift || exit
+#cd cktap-swift || exit
 
 # Unique subdir to prevent collisions
 UNIQUE_HEADER_SUBDIR="${NEW_HEADER_DIR}/${HEADER_BASENAME}"

@@ -13,9 +13,9 @@ use serde;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-pub const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
-pub const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
-pub const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
+const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
+const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
+const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
 
 // Errors
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -30,16 +30,13 @@ pub enum Error {
     IncorrectSignature(String),
     #[error("Root cert is not from Coinkite. Card is counterfeit: {0}")]
     InvalidRootCert(String),
+    #[error("Card chain code doesn't match user provided chain code")]
+    InvalidChaincode,
     #[error("UnknownCardType: {0}")]
     UnknownCardType(String),
 
-    #[cfg(feature = "pcsc")]
-    #[error("PcSc: {0}")]
-    PcSc(String),
-
-    #[cfg(feature = "emulator")]
-    #[error("Emulator: {0}")]
-    Emulator(String),
+    #[error("Transport: {0}")]
+    Transport(String),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
@@ -127,7 +124,7 @@ impl From<secp256k1::Error> for Error {
 #[cfg(feature = "pcsc")]
 impl From<pcsc::Error> for Error {
     fn from(e: pcsc::Error) -> Self {
-        Error::PcSc(e.to_string())
+        Error::Transport(e.to_string())
     }
 }
 
@@ -174,7 +171,7 @@ fn build_apdu(header: &[u8], command: &[u8]) -> Vec<u8> {
     [header, &[command_len as u8], command].concat()
 }
 
-/// Applet Select
+/// Applet Select.
 #[derive(Default, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct AppletSelect {}
 
@@ -188,7 +185,7 @@ impl CommandApdu for AppletSelect {
     }
 }
 
-/// Status Command
+/// Status Command.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct StatusCommand {
     /// 'status' command
@@ -207,29 +204,51 @@ impl CommandApdu for StatusCommand {
     }
 }
 
+/// Response value from the [`StatusCommand`].
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct StatusResponse {
+    /// Version of CBOR protocol in use.
     pub proto: usize,
+    /// Firmware version of card itself.
     pub ver: String,
+    /// Card birth block height (int) (fixed after production).
     pub birth: usize,
+    /// SATSCARD Only: Tuple of (active_slot, num_slots).
     pub slots: Option<(u8, u8)>,
+    /// SATSCARD Only: Payment address, middle chars blanked out with 3 underscores.
     pub addr: Option<String>,
+    /// TAPSIGNER only: will be Some(true).
     pub tapsigner: Option<bool>,
+    /// SATSCHIP only: will be Some(true).
     pub satschip: Option<bool>,
+    /// TAPSIGNER or SATSCHIP only: a short array of integers, the subkey derivation currently in
+    /// effect. It encodes a BIP-32 derivation path, like m/84h/0h/0h, which is a typical value for
+    /// segwit usage, although the value is controlled by the wallet application. The field is only
+    /// present if a master key has been picked (i.e., setup is complete).
     pub path: Option<Vec<usize>>,
+    /// Counts up, when backup command is used.
     pub num_backups: Option<usize>,
+    /// Public key unique to this card (fixed for card life) aka: card_pubkey.
     #[serde(with = "serde_bytes")]
     pub pubkey: Vec<u8>,
+    /// Random bytes, changed each time we reply to a valid command.
     #[serde(with = "serde_bytes")]
     pub card_nonce: [u8; 16],
+    /// A development card will also have a testnet=True field; if false, the field is not provided.
+    /// Testnet cannot be enabled after leaving the factory, and those cards are only used by
+    /// CoinKite for internal testing.
     pub testnet: Option<bool>,
+    /// Shows the number of seconds required between attempts. Use the wait command to pass the
+    /// time. Another attempt is allowed after the delay passes. If the CVC value is correct,
+    /// normal operation begins. If the CVC value is incorrect, the 15-second delay between
+    /// attempts continues.
     #[serde(default)]
     pub auth_delay: Option<usize>,
 }
 
 impl ResponseApdu for StatusResponse {}
 
-/// Read Command
+/// Read Command.
 ///
 /// Apps need to write a CBOR message to read a SATSCARD's current payment address, or a
 /// TAPSIGNER's derived public key.
@@ -626,10 +645,14 @@ impl CommandApdu for SignCommand {
     }
 }
 
-/// Sign Response
-// SATSCARD: Arbitrary signatures can be created for unsealed slots. The app could perform this, since the private key is known, but it's best if the app isn't contaminated with private key information. This could be used for both spending and multisig wallet operations.
-//
-// TAPSIGNER: This is its core feature — signing an arbitrary message digest with a tap. Once the card is set up (the key is picked), the command will always be valid.
+/// Sign Response.
+///
+/// SATSCARD: Arbitrary signatures can be created for unsealed slots. The app could perform this,
+/// since the private key is known, but it's best if the app isn't contaminated with private key
+/// information. This could be used for both spending and multisig wallet operations.
+///
+/// TAPSIGNER: This is its core feature — signing an arbitrary message digest with a tap. Once the
+/// card is set up (the key is picked), the command will always be valid.
 #[derive(Deserialize, Clone, PartialEq, Eq)]
 pub struct SignResponse {
     /// command result

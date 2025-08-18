@@ -5,7 +5,10 @@ build:
     bash ./build-xcframework.sh
 
 clean:
-    rm -rf ../rust-cktap-ffi/target/
+    cargo clean
+    rm -rf Sources
+    rm -rf .build
+    rm -rf *.xcframework
 
 test:
     swift test

@@ -17,6 +17,7 @@ serde = "1"
 serde_bytes = "0.11"
 
 # async
+async-trait = "0.1.81"
 tokio = { version = "1.44", features = ["macros"] }
 
 # error handling

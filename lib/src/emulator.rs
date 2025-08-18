@@ -1,20 +1,22 @@
 use crate::CkTapCard;
 use crate::apdu::{AppletSelect, CommandApdu, Error, StatusCommand};
-use crate::commands::CkTransport;
+use crate::commands::{CkTransport, to_cktap};
+use async_trait::async_trait;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::string::ToString;
+use std::sync::Arc;
 
 pub const CVC: &str = "123456";
 
-pub async fn find_emulator(pipe_path: &Path) -> Result<CkTapCard<CardEmulator>, Error> {
+pub async fn find_emulator(pipe_path: &Path) -> Result<CkTapCard, Error> {
     if !pipe_path.exists() {
-        return Err(Error::Emulator("Emulator pipe doesn't exist.".to_string()));
+        return Err(Error::Transport("Emulator pipe doesn't exist.".to_string()));
     }
     let stream = UnixStream::connect(pipe_path).expect("unix stream");
     let card_emulator = CardEmulator { stream };
-    card_emulator.to_cktap().await
+    to_cktap(Arc::new(card_emulator)).await
 }
 
 #[derive(Debug)]
@@ -22,6 +24,7 @@ pub struct CardEmulator {
     stream: UnixStream,
 }
 
+#[async_trait]
 impl CkTransport for CardEmulator {
     async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
         // convert select_apdu into StatusCommand apdu bytes
@@ -37,12 +40,12 @@ impl CkTransport for CardEmulator {
         // trim first 5 bytes from command apdu bytes to get the cbor data
         stream
             .write_all(&command_apdu.as_slice()[5..])
-            .map_err(|e| Error::Emulator(e.to_string()))?;
+            .map_err(|e| Error::Transport(e.to_string()))?;
         let mut buffer = [0; 4096];
         // read up to 4096 bytes
         stream
             .read(&mut buffer[..])
-            .map_err(|e| Error::Emulator(e.to_string()))?;
+            .map_err(|e| Error::Transport(e.to_string()))?;
         Ok(buffer.to_vec())
     }
 }

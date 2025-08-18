@@ -1,4 +1,6 @@
+use async_trait::async_trait;
 use bitcoin::secp256k1::{All, PublicKey, Secp256k1};
+use std::sync::Arc;
 
 use crate::apdu::{Error, StatusResponse};
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
@@ -8,8 +10,8 @@ use crate::tap_signer::TapSignerShared;
 ///   except, as of v1.0.0: `num_backups` in status field is omitted, and
 ///   a flag `satschip=True` will be present instead. The "backup" command
 ///   is not supported and will fail with 404 error.
-pub struct SatsChip<T: CkTransport> {
-    pub transport: T,
+pub struct SatsChip {
+    pub transport: Arc<dyn CkTransport>,
     pub secp: Secp256k1<All>,
     pub proto: usize,
     pub ver: String,
@@ -22,7 +24,7 @@ pub struct SatsChip<T: CkTransport> {
     pub auth_delay: Option<usize>,
 }
 
-impl<T: CkTransport> Authentication<T> for SatsChip<T> {
+impl Authentication for SatsChip {
     fn secp(&self) -> &Secp256k1<All> {
         &self.secp
     }
@@ -51,19 +53,23 @@ impl<T: CkTransport> Authentication<T> for SatsChip<T> {
         self.auth_delay = auth_delay;
     }
 
-    fn transport(&self) -> &T {
-        &self.transport
+    fn transport(&self) -> Arc<dyn CkTransport> {
+        self.transport.clone()
     }
 }
 
-impl<T: CkTransport> TapSignerShared<T> for SatsChip<T> {}
+#[async_trait]
+impl TapSignerShared for SatsChip {}
 
-impl<T: CkTransport> SatsChip<T> {
-    pub fn try_from_status(transport: T, status_response: StatusResponse) -> Result<Self, Error> {
+impl SatsChip {
+    pub fn try_from_status(
+        transport: Arc<dyn CkTransport>,
+        status_response: StatusResponse,
+    ) -> Result<Self, Error> {
         let pubkey = status_response.pubkey.as_slice();
         let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
 
-        Ok(Self {
+        Ok(SatsChip {
             transport,
             secp: Secp256k1::new(),
             proto: status_response.proto,
@@ -78,9 +84,11 @@ impl<T: CkTransport> SatsChip<T> {
     }
 }
 
-impl<T: CkTransport> Wait<T> for SatsChip<T> {}
+#[async_trait]
+impl Wait for SatsChip {}
 
-impl<T: CkTransport> Read<T> for SatsChip<T> {
+#[async_trait]
+impl Read for SatsChip {
     fn requires_auth(&self) -> bool {
         true
     }
@@ -90,13 +98,14 @@ impl<T: CkTransport> Read<T> for SatsChip<T> {
     }
 }
 
-impl<T: CkTransport> Certificate<T> for SatsChip<T> {
+#[async_trait]
+impl Certificate for SatsChip {
     async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
         Ok(None)
     }
 }
 
-impl<T: CkTransport> core::fmt::Debug for SatsChip<T> {
+impl core::fmt::Debug for SatsChip {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SatsChip")
             .field("proto", &self.proto)

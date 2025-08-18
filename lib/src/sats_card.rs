@@ -1,17 +1,20 @@
+use async_trait::async_trait;
 use bitcoin::key::CompressedPublicKey as BitcoinPublicKey;
-use bitcoin::secp256k1::{All, Message, PublicKey, Secp256k1, ecdsa::Signature};
+use bitcoin::secp256k1::{All, Message, PublicKey, Secp256k1, SecretKey, ecdsa::Signature};
 use bitcoin::{Address, Network};
 use bitcoin_hashes::sha256;
+use std::sync::Arc;
 
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, Error, NewCommand,
     NewResponse, StatusResponse, UnsealCommand, UnsealResponse,
 };
-use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
+use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
+use crate::secp256k1;
 use bitcoin_hashes::hex::DisplayHex;
 
-pub struct SatsCard<T: CkTransport> {
-    pub transport: T,
+pub struct SatsCard {
+    pub transport: Arc<dyn CkTransport>,
     pub secp: Secp256k1<All>,
     pub proto: usize,
     pub ver: String,
@@ -23,7 +26,7 @@ pub struct SatsCard<T: CkTransport> {
     pub auth_delay: Option<usize>,
 }
 
-impl<T: CkTransport> Authentication<T> for SatsCard<T> {
+impl Authentication for SatsCard {
     fn secp(&self) -> &Secp256k1<All> {
         &self.secp
     }
@@ -52,13 +55,16 @@ impl<T: CkTransport> Authentication<T> for SatsCard<T> {
         self.auth_delay = auth_delay;
     }
 
-    fn transport(&self) -> &T {
-        &self.transport
+    fn transport(&self) -> Arc<dyn CkTransport> {
+        self.transport.clone()
     }
 }
 
-impl<T: CkTransport> SatsCard<T> {
-    pub fn from_status(transport: T, status_response: StatusResponse) -> Result<Self, Error> {
+impl SatsCard {
+    pub fn from_status(
+        transport: Arc<dyn CkTransport>,
+        status_response: StatusResponse,
+    ) -> Result<Self, Error> {
         let pubkey = status_response.pubkey.as_slice();
         let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
 
@@ -85,22 +91,31 @@ impl<T: CkTransport> SatsCard<T> {
         slot: u8,
         chain_code: Option<[u8; 32]>,
         cvc: &str,
-    ) -> Result<NewResponse, Error> {
+    ) -> Result<u8, Error> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, NewCommand::name());
         let new_command = NewCommand::new(Some(slot), chain_code, epubkey, xcvc);
-        let new_response: NewResponse = self.transport.transmit(&new_command).await?;
+        let new_response: NewResponse = transmit(self.transport(), &new_command).await?;
         self.card_nonce = new_response.card_nonce;
         self.slots.0 = new_response.slot;
 
-        Ok(new_response)
+        Ok(new_response.slot)
     }
 
-    pub async fn derive(&mut self) -> Result<DeriveResponse, Error> {
+    /// Verify the master public key and chain code used to derive the payment public key.
+    ///
+    /// The derivation is fixed as m/0, meaning the first non-hardened derived key. SATSCARD
+    /// always uses that derived key as the payment address.
+    ///
+    /// The user should verify the returned card chain code matches the chain code they provided
+    /// when they created the current slot, see: [`Self::new_slot`].
+    ///
+    /// Ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive
+    pub async fn derive(&mut self) -> Result<[u8; 32], Error> {
         let nonce = crate::rand_nonce();
         let card_nonce = *self.card_nonce();
 
         let cmd = DeriveCommand::for_satscard(nonce);
-        let resp: DeriveResponse = self.transport().transmit(&cmd).await?;
+        let resp: DeriveResponse = transmit(self.transport(), &cmd).await?;
         self.set_card_nonce(resp.card_nonce);
 
         // Verify signature
@@ -115,22 +130,52 @@ impl<T: CkTransport> SatsCard<T> {
 
         let signature = Signature::from_compact(&resp.sig)?;
 
-        let pubkey = PublicKey::from_slice(&resp.master_pubkey)?;
-        self.secp().verify_ecdsa(&message, &signature, &pubkey)?;
+        let master_pubkey = PublicKey::from_slice(&resp.master_pubkey)?;
+        self.secp()
+            .verify_ecdsa(&message, &signature, &master_pubkey)?;
 
-        Ok(resp)
+        // return card chain code so user can verify it matches user provided chain code
+        let card_chaincode = &resp.chain_code;
+
+        // TODO verify a user's chain code (entropy) was used in picking the private key
+        // SATSCARD returns the card's chain code and master public key
+        // With the master pubkey and the chain code, reconstructs a BIP-32 XPUB (extended public key)
+        // and verify it matches the payment address the card shares (i.e., the slot's pubkey)
+        // it must equal the BIP-32 derived key (m/0) constructed from that XPUB.
+
+        Ok(*card_chaincode)
     }
 
-    pub async fn unseal(&mut self, slot: u8, cvc: &str) -> Result<UnsealResponse, Error> {
-        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, UnsealCommand::name());
+    /// Unseal a slot.
+    ///
+    /// Returns the private and corresponding public keys for that slot.
+    pub async fn unseal(&mut self, slot: u8, cvc: &str) -> Result<(SecretKey, PublicKey), Error> {
+        let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, UnsealCommand::name());
         let unseal_command = UnsealCommand::new(slot, epubkey, xcvc);
-        let unseal_response: UnsealResponse = self.transport.transmit(&unseal_command).await?;
+        let unseal_response: UnsealResponse = transmit(self.transport(), &unseal_command).await?;
         self.set_card_nonce(unseal_response.card_nonce);
 
-        Ok(unseal_response)
+        // private key for spending (for addr), 32 bytes
+        // the private key is encrypted, XORed with the session key, need to decrypt
+        let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+        // decrypt the private key by XORing with the session key
+        let privkey: Vec<u8> = session_key
+            .as_ref()
+            .iter()
+            .zip(&unseal_response.privkey)
+            .map(|(session_key_byte, privkey_byte)| session_key_byte ^ privkey_byte)
+            .collect();
+        let privkey = SecretKey::from_slice(&privkey)?;
+        let pubkey = PublicKey::from_slice(&unseal_response.pubkey)?;
+        // TODO should verify user provided chain code was used similar to above `derive`.
+        Ok((privkey, pubkey))
     }
 
-    pub async fn dump(&self, slot: usize, cvc: Option<String>) -> Result<DumpResponse, Error> {
+    pub async fn dump<T: CkTransport>(
+        &self,
+        slot: usize,
+        cvc: Option<String>,
+    ) -> Result<DumpResponse, Error> {
         let epubkey_xcvc = cvc.map(|cvc| {
             let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DumpCommand::name());
             (epubkey, xcvc)
@@ -141,21 +186,27 @@ impl<T: CkTransport> SatsCard<T> {
             .unwrap_or((None, None));
 
         let dump_command = DumpCommand::new(slot, epubkey, xcvc);
-        self.transport.transmit(&dump_command).await
+        let dump_response: DumpResponse = transmit(self.transport(), &dump_command).await?;
+        // TODO use chaincode and master public key to verify pubkey
+        // TODO only return the verified slot keys
+        // TODO return error if `tampered` is true
+        Ok(dump_response)
     }
 
     pub async fn address(&mut self) -> Result<String, Error> {
         let network = Network::Bitcoin;
-        let slot_pubkey = self.read(None).await?.pubkey;
-        let pk = BitcoinPublicKey::from_slice(&slot_pubkey)?;
+        let slot_pubkey = self.read(None).await?;
+        let pk = BitcoinPublicKey::from_slice(&slot_pubkey.serialize())?;
         let address = Address::p2wpkh(&pk, network);
         Ok(address.to_string())
     }
 }
 
-impl<T: CkTransport> Wait<T> for SatsCard<T> {}
+#[async_trait]
+impl Wait for SatsCard {}
 
-impl<T: CkTransport> Read<T> for SatsCard<T> {
+#[async_trait]
+impl Read for SatsCard {
     fn requires_auth(&self) -> bool {
         false
     }
@@ -164,14 +215,15 @@ impl<T: CkTransport> Read<T> for SatsCard<T> {
     }
 }
 
-impl<T: CkTransport> Certificate<T> for SatsCard<T> {
+#[async_trait]
+impl Certificate for SatsCard {
     async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
-        let pubkey = self.read(None).await?.pubkey(None)?;
+        let pubkey = self.read(None).await?;
         Ok(Some(pubkey))
     }
 }
 
-impl<T: CkTransport> core::fmt::Debug for SatsCard<T> {
+impl core::fmt::Debug for SatsCard {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SatsCard")
             .field("proto", &self.proto)

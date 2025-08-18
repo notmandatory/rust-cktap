@@ -1,7 +1,7 @@
 extern crate core;
 
 use bitcoin::key::rand::Rng as _;
-use commands::CkTransport;
+pub use commands::CkTransport;
 
 pub mod apdu;
 pub mod commands;
@@ -20,34 +20,35 @@ pub mod emulator;
 
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
+
 pub mod sats_card;
 pub mod sats_chip;
 pub mod tap_signer;
 
-pub type TapSigner<T> = tap_signer::TapSigner<T>;
-pub type SatsCard<T> = sats_card::SatsCard<T>;
+pub type SatsCard = sats_card::SatsCard;
+pub type TapSigner = tap_signer::TapSigner;
+pub type SatsChip = sats_chip::SatsChip;
 
-pub enum CkTapCard<T: CkTransport> {
-    SatsCard(SatsCard<T>),
-    TapSigner(TapSigner<T>),
-    SatsChip(SatsChip<T>),
+pub enum CkTapCard {
+    SatsCard(SatsCard),
+    TapSigner(TapSigner),
+    SatsChip(SatsChip),
 }
 
 // re-export
-use crate::sats_chip::SatsChip;
 pub use apdu::Error;
 
-impl<T: CkTransport> core::fmt::Debug for CkTapCard<T> {
+impl core::fmt::Debug for CkTapCard {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self {
-            CkTapCard::TapSigner(t) => {
-                write!(f, "CkTap::TapSigner({t:?})")
+            CkTapCard::TapSigner(ts) => {
+                write!(f, "CkTap::TapSigner({ts:?})")
             }
-            CkTapCard::SatsChip(t) => {
-                write!(f, "CkTap::SatsChip({t:?})")
+            CkTapCard::SatsChip(sc) => {
+                write!(f, "CkTap::SatsChip({sc:?})")
             }
-            CkTapCard::SatsCard(s) => {
-                write!(f, "CkTap::SatsCard({s:?})")
+            CkTapCard::SatsCard(sc) => {
+                write!(f, "CkTap::SatsCard({sc:?})")
             }
         }
     }
@@ -67,20 +68,3 @@ pub fn rand_nonce() -> [u8; 16] {
     rng.fill(&mut nonce);
     nonce
 }
-
-// Errors
-// #[derive(Debug)]
-// pub enum Error {
-
-//     // #[cfg(feature = "pcsc")]
-//     // PcSc(String),
-// }
-
-// impl<T> From<ciborium::de::Error<T>> for Error
-// where
-//     T: Debug,
-// {
-//     fn from(e: ciborium::de::Error<T>) -> Self {
-//         Error::CiborDe(e.to_string())
-//     }
-// }
