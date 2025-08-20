@@ -11,15 +11,38 @@ fmt:
 
 # lint the project
 clippy: fmt
-    cargo clippy --all-features --tests
+    cargo clippy --all-features --all-targets
 
 # build the project
 build: fmt
     cargo build --all-features --tests
 
+# setup the cktap emulator venv
+setup:
+    (test -d emulator_env || python3 -m venv emulator_env) && \
+    source emulator_env/bin/activate; pip install -r {{emulator_dir}}/requirements.txt > /dev/null 2>&1
+
+# get cktap emulator options help
+help:
+    source emulator_env/bin/activate; python3 coinkite/coinkite-tap-proto/emulator/ecard.py emulate --help
+
+# start the cktap emulator on /tmp/ecard-pipe
+start *OPTS: setup
+    source emulator_env/bin/activate; python3 coinkite/coinkite-tap-proto/emulator/ecard.py emulate {{OPTS}} &> emulator_env/output.log & \
+    echo $! > emulator_env/ecard.pid
+    echo "started emulator, pid:" `cat emulator_env/ecard.pid`
+
+# stop the cktap emulator
+stop:
+    if [ -f emulator_env/ecard.pid ]; then \
+        echo "killing emulator, pid:" `cat emulator_env/ecard.pid`; \
+        kill `cat emulator_env/ecard.pid` && rm emulator_env/ecard.pid; \
+    else \
+        echo "emulator pid file not found."; \
+    fi
+
 # test the rust-cktap lib with the coinkite cktap card emulator
-test: fmt
-    (test -d emulator_env || python3 -m venv emulator_env) && source emulator_env/bin/activate && pip install -r {{emulator_dir}}/requirements.txt
+test: fmt setup
     source emulator_env/bin/activate && cargo test -p rust-cktap --features emulator
 
 # clean the project target directory

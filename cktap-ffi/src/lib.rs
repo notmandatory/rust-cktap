@@ -6,23 +6,23 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum Error {
+pub enum CkTapError {
     #[error("Core Error: {msg}")]
     Core { msg: String },
     #[error("Transport Error: {msg}")]
     Transport { msg: String },
 }
 
-impl From<rust_cktap::Error> for Error {
+impl From<rust_cktap::Error> for CkTapError {
     fn from(e: rust_cktap::Error) -> Self {
-        Error::Core { msg: e.to_string() }
+        CkTapError::Core { msg: e.to_string() }
     }
 }
 
 #[uniffi::export(callback_interface)]
 #[async_trait::async_trait]
 pub trait CkTransport: Send + Sync {
-    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error>;
+    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, CkTapError>;
 }
 
 pub struct CkTransportWrapper(Box<dyn CkTransport>);
@@ -48,23 +48,23 @@ impl SatsCard {
         self.0.lock().await.ver().to_string()
     }
 
-    pub async fn address(&self) -> Result<String, Error> {
+    pub async fn address(&self) -> Result<String, CkTapError> {
         self.0
             .lock()
             .await
             .address()
             .await
-            .map_err(|e| Error::Core { msg: e.to_string() })
+            .map_err(|e| CkTapError::Core { msg: e.to_string() })
     }
 
-    pub async fn read(&self) -> Result<Vec<u8>, Error> {
+    pub async fn read(&self) -> Result<Vec<u8>, CkTapError> {
         self.0
             .lock()
             .await
             .read(None)
             .await
             .map(|pk| pk.serialize().to_vec())
-            .map_err(|e| Error::Core { msg: e.to_string() })
+            .map_err(|e| CkTapError::Core { msg: e.to_string() })
     }
     // TODO implement the rest of the commands
 }
@@ -78,14 +78,14 @@ impl TapSigner {
         self.0.lock().await.ver().to_string()
     }
 
-    pub async fn read(&self) -> Result<Vec<u8>, Error> {
+    pub async fn read(&self, cvc: String) -> Result<Vec<u8>, CkTapError> {
         self.0
             .lock()
             .await
-            .read(None)
+            .read(Some(cvc))
             .await
             .map(|pk| pk.serialize().to_vec())
-            .map_err(|e| Error::Core { msg: e.to_string() })
+            .map_err(|e| CkTapError::Core { msg: e.to_string() })
     }
     // TODO implement the rest of the commands
 }
@@ -99,14 +99,14 @@ impl SatsChip {
         self.0.lock().await.ver().to_string()
     }
 
-    pub async fn read(&self) -> Result<Vec<u8>, Error> {
+    pub async fn read(&self) -> Result<Vec<u8>, CkTapError> {
         self.0
             .lock()
             .await
             .read(None)
             .await
             .map(|pk| pk.serialize().to_vec())
-            .map_err(|e| Error::Core { msg: e.to_string() })
+            .map_err(|e| CkTapError::Core { msg: e.to_string() })
     }
     // TODO implement the rest of the commands
 }
@@ -119,11 +119,11 @@ pub enum CkTapCard {
 }
 
 #[uniffi::export]
-pub async fn to_cktap(transport: Box<dyn CkTransport>) -> Result<CkTapCard, Error> {
+pub async fn to_cktap(transport: Box<dyn CkTransport>) -> Result<CkTapCard, CkTapError> {
     let wrapper = CkTransportWrapper(transport);
     let cktap: rust_cktap::CkTapCard = rust_cktap::commands::to_cktap(Arc::new(wrapper))
         .await
-        .map_err(Into::<Error>::into)?;
+        .map_err(Into::<CkTapError>::into)?;
 
     match cktap {
         rust_cktap::CkTapCard::SatsCard(sc) => {
