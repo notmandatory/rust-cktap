@@ -1,3 +1,4 @@
+use crate::BIP32_HARDENED_MASK;
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand, NewResponse, SignCommand,
     SignResponse, StatusCommand, StatusResponse,
@@ -10,6 +11,13 @@ use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, ecdsa::Signat
 use bitcoin_hashes::sha256;
 use log::error;
 use std::sync::Arc;
+
+const BIP84_PATH_LEN: usize = 5;
+
+// BIP84 derivation path structure, m / 84' / 0' / account' / change / address_index
+
+// Derivation sub-path indexes that must be hardened
+const BIP84_HARDENED_SUBPATH: [usize; 3] = [0, 1, 2];
 
 pub struct TapSigner {
     pub transport: Arc<dyn CkTransport>,
@@ -69,11 +77,14 @@ pub enum PsbtSignError {
     #[error(transparent)]
     TapSignerError(#[from] Error),
 
-    #[error("pubkey mismatch: index: {0}")]
+    #[error("Pubkey mismatch: index: {0}")]
     PubkeyMismatch(usize),
 
     #[error("Invalid path at index: {0}")]
     InvalidPath(usize),
+
+    #[error("Signing slot is not unsealed: {0}")]
+    SlotNotUnsealed(u8),
 }
 
 impl Authentication for TapSigner {
@@ -130,7 +141,6 @@ pub trait TapSignerShared: Authentication {
         Ok(status_response)
     }
 
-    // TODO move to pub(crate) trait
     /// Sign a message digest with the tap signer
     async fn sign(
         &mut self,
@@ -217,16 +227,14 @@ pub trait TapSignerShared: Authentication {
                 .next()
                 .ok_or(Error::MissingPubkey(input_index))?;
 
-            // 1 << 31
-            const HARDENED: u32 = 0x80000000;
             let path = path.to_u32_vec();
 
-            if path.len() != 5 {
+            if path.len() != BIP84_PATH_LEN {
                 return Err(Error::InvalidPath(input_index));
             }
 
-            let sub_path = vec![path[3], path[4]];
-            if sub_path.iter().any(|p| *p > HARDENED) {
+            let sub_path = BIP84_HARDENED_SUBPATH.map(|i| path[i]);
+            if sub_path.iter().any(|p| *p > BIP32_HARDENED_MASK) {
                 return Err(Error::InvalidPath(input_index));
             }
 
@@ -240,21 +248,25 @@ pub trait TapSignerShared: Authentication {
             let digest: &[u8; 32] = sighash.as_ref();
 
             // send digest to TAPSIGNER for signing
-            let mut sign_response = self.sign(*digest, sub_path.clone(), cvc).await?;
+            let mut sign_response = self.sign(*digest, sub_path.to_vec(), cvc).await?;
             let mut signature_raw = sign_response.sig;
 
             // verify that TAPSIGNER used the same public key as the PSBT
             if sign_response.pubkey != psbt_pubkey.serialize() {
                 // try deriving the TAPSIGNER and try again
                 // take the hardened path and remove the hardened bit, because `sign` hardens it
-                let path: Vec<u32> = path.into_iter().map(|p| p ^ (1 << 31)).take(3).collect();
+                let path: Vec<u32> = path
+                    .into_iter()
+                    .map(|p| p ^ BIP32_HARDENED_MASK)
+                    .take(BIP84_HARDENED_SUBPATH.len())
+                    .collect();
                 let derive_response = self.derive(&path, cvc).await;
                 if derive_response.is_err() {
                     return Err(Error::PubkeyMismatch(input_index));
                 }
 
                 // update signature to the new one we just derived
-                sign_response = self.sign(*digest, sub_path, cvc).await?;
+                sign_response = self.sign(*digest, sub_path.to_vec(), cvc).await?;
                 signature_raw = sign_response.sig;
 
                 // if still not matching, return error

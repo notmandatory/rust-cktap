@@ -6,11 +6,13 @@ use bitcoin_hashes::sha256;
 use std::sync::Arc;
 
 use crate::apdu::{
-    CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, Error, NewCommand,
-    NewResponse, StatusResponse, UnsealCommand, UnsealResponse,
+    CkTapError, CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, Error,
+    NewCommand, NewResponse, SignCommand, SignResponse, StatusResponse, UnsealCommand,
+    UnsealResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
 use crate::secp256k1;
+use crate::tap_signer::PsbtSignError;
 use bitcoin_hashes::hex::DisplayHex;
 
 pub struct SatsCard {
@@ -188,8 +190,8 @@ impl SatsCard {
         let dump_command = DumpCommand::new(slot, epubkey, xcvc);
         let dump_response: DumpResponse = transmit(self.transport(), &dump_command).await?;
         // TODO use chaincode and master public key to verify pubkey
-        // TODO only return the verified slot keys
         // TODO return error if `tampered` is true
+        // TODO only return the verified slot key and status
         Ok(dump_response)
     }
 
@@ -199,6 +201,125 @@ impl SatsCard {
         let pk = BitcoinPublicKey::from_slice(&slot_pubkey.serialize())?;
         let address = Address::p2wpkh(&pk, network);
         Ok(address.to_string())
+    }
+
+    /// Sign a message digest with the SATSCARD.
+    pub async fn sign(
+        &mut self,
+        digest: [u8; 32],
+        slot: u8,
+        cvc: &str,
+    ) -> Result<SignResponse, Error> {
+        let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, SignCommand::name());
+
+        // Use the same session key to encrypt the new CVC
+        let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+
+        // encrypt the digest by XORing with the session key
+        let xdigest_vec: Vec<u8> = session_key
+            .as_ref()
+            .iter()
+            .zip(digest)
+            .map(|(session_key_byte, digest_byte)| session_key_byte ^ digest_byte)
+            .collect();
+
+        let xdigest: [u8; 32] = xdigest_vec.try_into().expect("input is also 32 bytes");
+
+        let sign_command = SignCommand::for_satscard(slot, xdigest, epubkey, xcvc.clone());
+
+        let mut sign_response: Result<SignResponse, Error> =
+            transmit(self.transport(), &sign_command).await;
+
+        let mut unlucky_number_retries = 0;
+        while let Err(Error::CkTap(CkTapError::UnluckyNumber)) = sign_response {
+            let sign_command = SignCommand::for_satscard(slot, xdigest, epubkey, xcvc.clone());
+
+            sign_response = transmit(self.transport(), &sign_command).await;
+            unlucky_number_retries += 1;
+
+            if unlucky_number_retries > 3 {
+                // TODO shouldn't this return an Err(UnluckyNumber) ?
+                break;
+            }
+        }
+
+        let sign_response = sign_response?;
+        self.set_card_nonce(sign_response.card_nonce);
+        Ok(sign_response)
+    }
+
+    /// Sign P2WPKH inputs for a PSBT with unsealed slot private key m/0
+    /// This function will return a signed but not finalized PSBT. You will need to finalize the
+    /// PSBT yourself before it can be broadcast.
+    pub async fn sign_psbt(
+        &mut self,
+        slot: u8,
+        mut psbt: bitcoin::Psbt,
+        cvc: &str,
+    ) -> Result<bitcoin::Psbt, PsbtSignError> {
+        use bitcoin::{
+            secp256k1::ecdsa,
+            sighash::{EcdsaSighashType, SighashCache},
+        };
+
+        type Error = PsbtSignError;
+
+        let unsigned_tx = psbt.unsigned_tx.clone();
+        let mut sighash_cache = SighashCache::new(&unsigned_tx);
+
+        for (input_index, input) in psbt.inputs.iter_mut().enumerate() {
+            // extract previous output data from the PSBT
+            let witness_utxo = input
+                .witness_utxo
+                .as_ref()
+                .ok_or(Error::MissingUtxo(input_index))?;
+
+            let amount = witness_utxo.value;
+
+            // extract the P2WPKH script from PSBT
+            let script_pubkey = &witness_utxo.script_pubkey;
+            if !script_pubkey.is_p2wpkh() {
+                return Err(Error::InvalidScript(input_index));
+            }
+
+            // get the public key from the PSBT
+            let key_pairs = &input.bip32_derivation;
+            let (psbt_pubkey, (_fingerprint, path)) = key_pairs
+                .iter()
+                .next()
+                .ok_or(Error::MissingPubkey(input_index))?;
+
+            if !path.is_empty() {
+                return Err(Error::InvalidPath(input_index));
+            }
+
+            // calculate sighash
+            let script = script_pubkey.as_script();
+            let sighash = sighash_cache
+                .p2wpkh_signature_hash(input_index, script, amount, EcdsaSighashType::All)
+                .map_err(|e| Error::SighashError(e.to_string()))?;
+
+            // the digest is the sighash
+            let digest: &[u8; 32] = sighash.as_ref();
+
+            // send digest to SATSCARD for signing
+            let sign_response = self.sign(*digest, slot, cvc).await?;
+            let signature_raw = sign_response.sig;
+
+            // verify that SATSCARD used the same public key as the PSBT
+            if sign_response.pubkey != psbt_pubkey.serialize() {
+                return Err(Error::PubkeyMismatch(input_index));
+            }
+
+            // update the PSBT input with the signature
+            let ecdsa_sig = ecdsa::Signature::from_compact(&signature_raw)
+                .map_err(|e| Error::SignatureError(e.to_string()))?;
+
+            let final_sig = bitcoin::ecdsa::Signature::sighash_all(ecdsa_sig);
+            input.partial_sigs.insert((*psbt_pubkey).into(), final_sig);
+        }
+
+        Ok(psbt)
     }
 }
 
@@ -235,5 +356,109 @@ impl core::fmt::Debug for SatsCard {
             .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .field("auth_delay", &self.auth_delay)
             .finish()
+    }
+}
+
+#[cfg(feature = "emulator")]
+#[cfg(test)]
+mod test {
+    use crate::CkTapCard;
+    use crate::commands::Certificate;
+    use crate::emulator::find_emulator;
+    use crate::emulator::test::{CardTypeOption, EcardSubprocess};
+    use bdk_wallet::chain::{BlockId, ConfirmationBlockTime};
+    use bdk_wallet::template::P2Wpkh;
+    use bdk_wallet::test_utils::{insert_anchor, insert_checkpoint, insert_tx, new_tx};
+    use bdk_wallet::{KeychainKind, SignOptions, Wallet};
+    use bitcoin::Network::{Bitcoin, Testnet};
+    use bitcoin::hashes::Hash;
+    use bitcoin::{
+        Address, Amount, BlockHash, FeeRate, Network, PrivateKey, PublicKey, Transaction, TxOut,
+    };
+    use std::path::Path;
+    use std::str::FromStr;
+
+    // verify a signed psbt can be finalized
+    #[tokio::test]
+    async fn test_satscard_sign_psbt() {
+        let card_type = CardTypeOption::SatsCard;
+        let pipe_path = "/tmp/test-satscard-sign-psbt-pipe";
+        let pipe_path = Path::new(&pipe_path);
+        let python = EcardSubprocess::new(pipe_path, &card_type).unwrap();
+        let emulator = find_emulator(pipe_path).await.unwrap();
+        if let CkTapCard::SatsCard(mut sc) = emulator {
+            let slot_pubkey = sc.slot_pubkey().await.unwrap().unwrap();
+            let card_address = sc.address().await.unwrap();
+            let (seckey, pubkey) = sc.unseal(0, "123456").await.unwrap();
+            assert_eq!(pubkey, slot_pubkey);
+
+            let _seckey = PrivateKey::new(seckey, Bitcoin);
+            let pubkey = PublicKey::new(pubkey);
+
+            let descriptor = P2Wpkh(pubkey);
+            let mut wallet = Wallet::create_single(descriptor)
+                .network(Network::Bitcoin)
+                .create_wallet_no_persist()
+                .unwrap();
+            let wallet_address = wallet.reveal_next_address(KeychainKind::External).address;
+            assert_eq!(&wallet_address.to_string(), &card_address);
+
+            let tx0 = Transaction {
+                output: vec![TxOut {
+                    value: Amount::from_sat(76_000),
+                    script_pubkey: wallet_address.script_pubkey(),
+                }],
+                ..new_tx(0)
+            };
+
+            insert_checkpoint(
+                &mut wallet,
+                BlockId {
+                    height: 1_000,
+                    hash: BlockHash::all_zeros(),
+                },
+            );
+            insert_checkpoint(
+                &mut wallet,
+                BlockId {
+                    height: 2_000,
+                    hash: BlockHash::all_zeros(),
+                },
+            );
+            insert_tx(&mut wallet, tx0.clone());
+            insert_anchor(
+                &mut wallet,
+                tx0.compute_txid(),
+                ConfirmationBlockTime {
+                    block_id: BlockId {
+                        height: 1_000,
+                        hash: BlockHash::all_zeros(),
+                    },
+                    confirmation_time: 100,
+                },
+            );
+            let balance = wallet.balance();
+            assert_eq!(balance.confirmed, Amount::from_sat(76_000));
+            let mut builder = wallet.build_tx();
+            builder
+                .add_recipient(
+                    Address::from_str("tb1qlvuuza7al8k6shl67qv00g8va3eepy70a42nxd")
+                        .unwrap()
+                        .require_network(Testnet)
+                        .unwrap(),
+                    Amount::from_sat(1000),
+                )
+                .fee_rate(FeeRate::from_sat_per_vb(2).unwrap());
+            let psbt = builder.finish().unwrap();
+            let mut signed_psbt = sc.sign_psbt(0, psbt, "123456").await.unwrap();
+            let finalized = wallet
+                .finalize_psbt(&mut signed_psbt, SignOptions::default())
+                .unwrap();
+            assert!(finalized);
+        } else {
+            panic!("Expected SatsCard");
+        }
+
+        drop(python);
     }
 }

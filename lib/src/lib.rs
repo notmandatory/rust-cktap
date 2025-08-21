@@ -1,6 +1,8 @@
 extern crate core;
 
 use bitcoin::key::rand::Rng as _;
+pub use bitcoin::*;
+
 pub use commands::CkTransport;
 
 pub mod apdu;
@@ -28,6 +30,9 @@ pub mod tap_signer;
 pub type SatsCard = sats_card::SatsCard;
 pub type TapSigner = tap_signer::TapSigner;
 pub type SatsChip = sats_chip::SatsChip;
+
+// BIP 32 hardened derivation bitmask, 1 << 31
+const BIP32_HARDENED_MASK: u32 = 1 << 31;
 
 pub enum CkTapCard {
     SatsCard(SatsCard),

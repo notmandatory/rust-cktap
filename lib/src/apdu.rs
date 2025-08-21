@@ -10,9 +10,10 @@ use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
 use serde;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
+
 const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
@@ -34,9 +35,12 @@ pub enum Error {
     InvalidChaincode,
     #[error("UnknownCardType: {0}")]
     UnknownCardType(String),
-
     #[error("Transport: {0}")]
     Transport(String),
+    #[error("PSBT: {0}")]
+    Psbt(String),
+    #[error("Sign PSBT: {0}")]
+    SignPsbt(String),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
@@ -575,7 +579,7 @@ impl CommandApdu for NfcCommand {
 
 /// nfc Response
 ///
-/// URL for smart phone to navigate to
+/// URL for smartphone to navigate to
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcResponse {
     /// command result
@@ -584,43 +588,52 @@ pub struct NfcResponse {
 
 impl ResponseApdu for NfcResponse {}
 
-/// Sign Command
-// {
-//     'cmd': 'sign',              # command
-//     'slot': 0,                  # (optional) which slot's to key to use, must be unsealed.
-//     'subpath': [0, 0],          # (TAPSIGNER only) additional derivation keypath to be used
-//     'digest': (32 bytes),        # message digest to be signed
-//     'epubkey': (33 bytes),       # app's ephemeral public key
-//     'xcvc': (6 bytes)          # encrypted CVC value
-// }
+// This function is needed because the subpath field can only be included (and not as an Option)
+// when signing with a TAPSIGNER and NOT with a SATSCARD.
+fn serialize_some<T, S>(opt: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: Serialize,
+    S: Serializer,
+{
+    opt.as_ref().unwrap().serialize(serializer)
+}
+
+/// Sign Command.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignCommand {
+    /// Command, must be 'sign'.
     cmd: &'static str,
+    /// (SATSCARD only) Which slot's to key to use, must be unsealed.
     slot: Option<u8>,
-    // 0,1 or 2 length
-    #[serde(rename = "subpath")]
-    sub_path: Vec<u32>,
-    // additional keypath for TapSigner only
+    /// (TAPSIGNER only) Additional derivation key path to be used; must be 0, 1 or 2 length.
+    #[serde(
+        rename = "subpath",
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_some"
+    )]
+    sub_path: Option<Vec<u32>>,
+    /// Message digest to be signed.
     #[serde(with = "serde_bytes")]
     digest: [u8; 32],
-    // message digest to be signed
+    /// App's ephemeral public key.
     #[serde(with = "serde_bytes")]
     epubkey: [u8; 33],
+    /// Encrypted CVC value.
     #[serde(with = "serde_bytes")]
     xcvc: Vec<u8>,
 }
 
 impl SignCommand {
-    // pub fn for_satscard(slot: Option<u8>, digest: Vec<u8>, epubkey: Vec<u8>, xcvc: Vec<u8>) -> Self {
-    //     Self {
-    //         cmd: "sign".to_string(),
-    //         slot,
-    //         digest,
-    //         subpath: None,
-    //         epubkey,
-    //         xcvc,
-    //     }
-    // }
+    pub fn for_satscard(slot: u8, digest: [u8; 32], epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+        SignCommand {
+            cmd: Self::name(),
+            slot: Some(slot),
+            sub_path: None, // field will not be included in serialization
+            digest,
+            epubkey: epubkey.serialize(),
+            xcvc,
+        }
+    }
 
     pub fn for_tapsigner(
         sub_path: Vec<u32>,
@@ -631,7 +644,7 @@ impl SignCommand {
         SignCommand {
             cmd: Self::name(),
             slot: Some(0),
-            sub_path,
+            sub_path: Some(sub_path), // field and value will be serialized but without the Option
             digest,
             epubkey: epubkey.serialize(),
             xcvc,

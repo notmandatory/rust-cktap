@@ -8,11 +8,12 @@ use rust_cktap::emulator;
 use rust_cktap::pcsc;
 use rust_cktap::secp256k1::rand;
 use rust_cktap::tap_signer::TapSignerShared;
-use rust_cktap::{CkTapCard, apdu::Error, commands::Certificate, rand_chaincode};
+use rust_cktap::{CkTapCard, Psbt, apdu::Error, commands::Certificate, rand_chaincode};
 use std::io;
 use std::io::Write;
 #[cfg(feature = "emulator")]
 use std::path::Path;
+use std::str::FromStr;
 
 /// SatsCard CLI
 #[derive(Parser)]
@@ -40,6 +41,13 @@ enum SatsCardCommand {
     Unseal,
     /// Get the payment address and verify it follows from the chain code and master public key
     Derive,
+    /// Sign a PSBT with the current slot (must be unsealed)
+    Sign {
+        /// Slot to sign with
+        slot: u8,
+        /// Unsigned PSBT
+        psbt: String,
+    },
     /// Call wait command until no auth delay
     Wait,
 }
@@ -146,6 +154,14 @@ async fn main() -> Result<(), Error> {
                     let slot = sc.slot().expect("current slot number");
                     let (privkey, pubkey) = &sc.unseal(slot, &cvc()).await?;
                     println!("privkey: {}, pubkey: {pubkey}", privkey.display_secret())
+                }
+                SatsCardCommand::Sign { slot, psbt } => {
+                    let psbt = Psbt::from_str(&psbt).map_err(|e| Error::Psbt(e.to_string()))?;
+                    let signed_psbt = sc
+                        .sign_psbt(slot, psbt, &cvc())
+                        .await
+                        .map_err(|e| Error::SignPsbt(e.to_string()))?;
+                    println!("signed_psbt: {signed_psbt}");
                 }
                 SatsCardCommand::Derive => {
                     dbg!(&sc.derive().await);

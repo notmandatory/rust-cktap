@@ -15,7 +15,7 @@ clippy: fmt
 
 # build the project
 build: fmt
-    cargo build --all-features --tests
+    cargo build --all-features --all-targets
 
 # setup the cktap emulator venv
 setup:

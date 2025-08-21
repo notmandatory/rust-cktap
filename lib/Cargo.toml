@@ -24,7 +24,7 @@ tokio = { version = "1.44", features = ["macros"] }
 thiserror = "2.0"
 
 # bitcoin
-bitcoin = { version = "0.32", features = ["rand-std"] }
+bitcoin = { version = "0.32.7", features = ["rand-std", "base64"] }
 bitcoin_hashes = "0.16.0"
 
 # logging
@@ -36,6 +36,7 @@ pcsc = { version = "2", optional = true }
 [dev-dependencies]
 
 tokio = { version = "1.44", features = ["rt"] }
+bdk_wallet = { version = "2.1.0", features = ["all-keys","test-utils"] }
 
 [features]
 default = []
