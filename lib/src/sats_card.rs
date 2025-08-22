@@ -173,11 +173,7 @@ impl SatsCard {
         Ok((privkey, pubkey))
     }
 
-    pub async fn dump<T: CkTransport>(
-        &self,
-        slot: usize,
-        cvc: Option<String>,
-    ) -> Result<DumpResponse, Error> {
+    pub async fn dump(&self, slot: u8, cvc: Option<String>) -> Result<DumpResponse, Error> {
         let epubkey_xcvc = cvc.map(|cvc| {
             let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DumpCommand::name());
             (epubkey, xcvc)

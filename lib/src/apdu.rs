@@ -908,7 +908,7 @@ pub struct DumpCommand {
     /// 'dump' command
     cmd: &'static str,
     /// which slot to dump, must be unsealed.
-    slot: usize,
+    slot: u8,
     /// app's ephemeral public key (optional), 33 bytes
     #[serde(with = "serde_bytes")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -920,7 +920,7 @@ pub struct DumpCommand {
 }
 
 impl DumpCommand {
-    pub fn new(slot: usize, epubkey: Option<PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(slot: u8, epubkey: Option<PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
         DumpCommand {
             cmd: Self::name(),
             slot,

@@ -41,6 +41,8 @@ enum SatsCardCommand {
     Unseal,
     /// Get the payment address and verify it follows from the chain code and master public key
     Derive,
+    /// This reveals the details for any slot. The current slot is not affected.
+    Dump { slot: u8 },
     /// Sign a PSBT with the current slot (must be unsealed)
     Sign {
         /// Slot to sign with
@@ -165,6 +167,12 @@ async fn main() -> Result<(), Error> {
                 }
                 SatsCardCommand::Derive => {
                     dbg!(&sc.derive().await);
+                }
+                SatsCardCommand::Dump { slot } => {
+                    let cvc = cvc();
+                    let cvc = if cvc.is_empty() { None } else { Some(cvc) };
+                    let response = sc.dump(slot, cvc).await?;
+                    dbg!(response);
                 }
                 SatsCardCommand::Wait => wait(sc).await,
             }
