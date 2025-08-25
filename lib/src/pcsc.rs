@@ -1,10 +1,13 @@
 extern crate core;
 
 use crate::Error;
+use crate::commands::to_cktap;
 use crate::{CkTapCard, CkTransport};
+use async_trait::async_trait;
 use pcsc::{Card, Context, MAX_BUFFER_SIZE, Protocols, Scope, ShareMode};
+use std::sync::Arc;
 
-pub async fn find_first() -> Result<CkTapCard<Card>, Error> {
+pub async fn find_first() -> Result<CkTapCard, Error> {
     // Establish a PC/SC context.
     let ctx = Context::establish(Scope::User)?;
 
@@ -17,19 +20,19 @@ pub async fn find_first() -> Result<CkTapCard<Card>, Error> {
         Some(reader) => Ok(reader),
         None => {
             //println!("No readers are connected.");
-            Err(Error::PcSc("No readers are connected.".to_string()))
+            Err(Error::Transport("No readers are connected.".to_string()))
         }
     }?;
 
-    ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?
-        .to_cktap()
-        .await
+    let card = ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?;
+    to_cktap(Arc::new(card)).await
 }
 
+#[async_trait]
 impl CkTransport for Card {
-    async fn transmit_apdu(&self, apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
+    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error> {
         let mut receive_buffer = vec![0; MAX_BUFFER_SIZE];
-        let rapdu = self.transmit(apdu.as_slice(), &mut receive_buffer)?;
+        let rapdu = self.transmit(command_apdu.as_slice(), &mut receive_buffer)?;
         Ok(rapdu.to_vec())
     }
 }

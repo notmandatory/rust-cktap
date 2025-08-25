@@ -38,8 +38,7 @@ async fn main() -> Result<(), Error> {
             // only do this once per card!
             if ts.path.is_none() {
                 let chain_code = rand_chaincode(rng);
-                let new_result = ts.init(chain_code, &cvc).await.unwrap();
-                dbg!(new_result);
+                ts.init(chain_code, &cvc).await.unwrap();
             }
 
             // let read_result = ts.read(Some(cvc.clone())).await?;
@@ -68,8 +67,7 @@ async fn main() -> Result<(), Error> {
             // only do this once per card!
             if chip.path.is_none() {
                 let chain_code = rand_chaincode(rng);
-                let new_result = chip.init(chain_code, &get_cvc()).await.unwrap();
-                dbg!(new_result);
+                chip.init(chain_code, &get_cvc()).await.unwrap();
             }
 
             // let read_result = chip.read(Some(cvc.clone())).await?;

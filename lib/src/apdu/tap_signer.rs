@@ -2,11 +2,13 @@ use core::fmt::{self, Formatter};
 
 use super::{CommandApdu, ResponseApdu};
 
-use bitcoin::secp256k1::{PublicKey, hashes::hex::DisplayHex as _};
+use bitcoin::secp256k1::PublicKey;
+use bitcoin_hashes::hex::DisplayHex as _;
 use serde::{Deserialize, Serialize};
 
 // MARK: - XpubCommand
-/// TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master) or the derived key in use (see 'path' value in status response)
+/// TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master)
+/// or the derived key in use (see 'path' value in status response)
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct XpubCommand {
     cmd: &'static str, // always "xpub"

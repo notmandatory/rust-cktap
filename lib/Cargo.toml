@@ -17,13 +17,15 @@ serde = "1"
 serde_bytes = "0.11"
 
 # async
+async-trait = "0.1.81"
 tokio = { version = "1.44", features = ["macros"] }
 
 # error handling
 thiserror = "2.0"
 
 # bitcoin
-bitcoin = { version = "0.32", features = ["rand-std"] }
+bitcoin = { version = "0.32.7", features = ["rand-std", "base64"] }
+bitcoin_hashes = "0.16.0"
 
 # logging
 log = "0.4"
@@ -34,6 +36,7 @@ pcsc = { version = "2", optional = true }
 [dev-dependencies]
 
 tokio = { version = "1.44", features = ["rt"] }
+bdk_wallet = { version = "2.1.0", features = ["all-keys","test-utils"] }
 
 [features]
 default = []
