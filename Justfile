@@ -43,7 +43,7 @@ stop:
 
 # test the rust-cktap lib with the coinkite cktap card emulator
 test: fmt setup
-    source emulator_env/bin/activate && cargo test -p rust-cktap --features emulator
+    source emulator_env/bin/activate && cargo test -p rust-cktap --features emulator -- --nocapture
 
 # clean the project target directory
 clean:
@@ -52,3 +52,7 @@ clean:
 # run the cli locally with a usb pcsc card reader (HID OMNIKEY 5022 CL Rev:C)
 run *CMD:
     cargo run -p cktap-cli {{CMD}}
+
+# run the cli locally with an emulated satscard (see start and stop recipes)
+run_emu *CMD:
+    cargo run -p cktap-cli --features emulator -- {{CMD}}

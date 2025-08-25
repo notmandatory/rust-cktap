@@ -280,7 +280,6 @@ mod tests {
                 CkTapCard::TapSigner(mut ts) => {
                     assert_eq!(card_type, CardTypeOption::TapSigner);
                     let response = ts.init(chain_code, CVC).await;
-                    dbg!(&response);
                     assert!(response.is_ok())
                 }
                 CkTapCard::SatsChip(mut sc) => {

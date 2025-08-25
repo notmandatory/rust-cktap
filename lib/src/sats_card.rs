@@ -173,22 +173,66 @@ impl SatsCard {
         Ok((privkey, pubkey))
     }
 
-    pub async fn dump(&self, slot: u8, cvc: Option<String>) -> Result<DumpResponse, Error> {
-        let epubkey_xcvc = cvc.map(|cvc| {
-            let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DumpCommand::name());
-            (epubkey, xcvc)
+    /// Dumps the slot key(s) for an unsealed slot.
+    ///
+    /// With the CVC the private and public slot address keys are returned.
+    /// Without the CVC, the private key is not included.
+    /// If an unsealed or unused slot number is given an error is returned.
+    pub async fn dump(
+        &mut self,
+        slot: u8,
+        cvc: Option<String>,
+    ) -> Result<(Option<SecretKey>, PublicKey), Error> {
+        let epubkey_eprivkey_xcvc = cvc.map(|cvc| {
+            let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DumpCommand::name());
+            (epubkey, eprivkey, xcvc)
         });
 
-        let (epubkey, xcvc) = epubkey_xcvc
-            .map(|(epubkey, xcvc)| (Some(epubkey), Some(xcvc)))
-            .unwrap_or((None, None));
+        let (epubkey, eprivkey, xcvc) = epubkey_eprivkey_xcvc
+            .map(|(epubkey, eprivkey, xcvc)| (Some(epubkey), Some(eprivkey), Some(xcvc)))
+            .unwrap_or((None, None, None));
 
-        let dump_command = DumpCommand::new(slot, epubkey, xcvc);
+        let dump_command = DumpCommand::new(slot, epubkey, xcvc.clone());
         let dump_response: DumpResponse = transmit(self.transport(), &dump_command).await?;
-        // TODO use chaincode and master public key to verify pubkey
-        // TODO return error if `tampered` is true
-        // TODO only return the verified slot key and status
-        Ok(dump_response)
+        self.set_card_nonce(dump_response.card_nonce);
+
+        // throw errors
+        if let Some(tampered) = dump_response.tampered {
+            if tampered {
+                return Err(Error::SlotTampered(slot));
+            }
+        } else if let Some(sealed) = dump_response.sealed {
+            if sealed {
+                return Err(Error::SlotSealed(slot));
+            }
+        } else if let Some(used) = dump_response.used {
+            if !used {
+                return Err(Error::SlotUnused(slot));
+            }
+        }
+
+        // at this point pubkey must be available
+        let pubkey_bytes = dump_response.pubkey.unwrap();
+        let pubkey = PublicKey::from_slice(&pubkey_bytes)?;
+        // TODO use chaincode and master public key to verify pubkey or return error
+
+        let seckey = if let (Some(privkey), Some(eprivkey)) = (dump_response.privkey, eprivkey) {
+            // the private key is encrypted, XORed with the session key, need to decrypt
+            let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+            // decrypt the private key by XORing with the session key
+            let privkey: Vec<u8> = session_key
+                .as_ref()
+                .iter()
+                .zip(&privkey)
+                .map(|(session_key_byte, privkey_byte)| session_key_byte ^ privkey_byte)
+                .collect();
+            let privkey = SecretKey::from_slice(&privkey)?;
+            Some(privkey)
+        } else {
+            None
+        };
+
+        Ok((seckey, pubkey))
     }
 
     pub async fn address(&mut self) -> Result<String, Error> {
@@ -355,13 +399,29 @@ impl core::fmt::Debug for SatsCard {
     }
 }
 
+/// Slot details for an in-use or unsealed slot.
+///
+/// Without the CVC, only the public details for each slot, is included.
+/// except unsealed slots where the address in full is also provided.
+#[derive(Clone, Debug)]
+pub struct SlotDetails {
+    /// Slot number.
+    pub slot: usize,
+    /// Private key for spending (for addr) or None if slot not unsealed or no CVC given.
+    pub privkey: Option<SecretKey>,
+    /// Public key for receiving bitcoin.
+    pub pubkey: PublicKey,
+    /// Full payment address (not censored).
+    pub addr: String,
+}
+
 #[cfg(feature = "emulator")]
 #[cfg(test)]
 mod test {
-    use crate::CkTapCard;
     use crate::commands::Certificate;
     use crate::emulator::find_emulator;
     use crate::emulator::test::{CardTypeOption, EcardSubprocess};
+    use crate::{CkTapCard, Error};
     use bdk_wallet::chain::{BlockId, ConfirmationBlockTime};
     use bdk_wallet::template::P2Wpkh;
     use bdk_wallet::test_utils::{insert_anchor, insert_checkpoint, insert_tx, new_tx};
@@ -455,6 +515,45 @@ mod test {
             panic!("Expected SatsCard");
         }
 
+        drop(python);
+    }
+
+    // test dumping a sealed, unsealed, and unsealed slot
+    #[tokio::test]
+    async fn test_satscard_dump() {
+        let card_type = CardTypeOption::SatsCard;
+        let pipe_path = "/tmp/test-satscard-dump-pipe";
+        let pipe_path = Path::new(&pipe_path);
+        let python = EcardSubprocess::new(pipe_path, &card_type).unwrap();
+        let emulator = find_emulator(pipe_path).await.unwrap();
+        if let CkTapCard::SatsCard(mut sc) = emulator {
+            // slot 0 is sealed, with cvc return sealed error
+            let slot_keys = sc.dump(0, Some("123456".to_string())).await;
+            assert!(matches!(slot_keys, Err(Error::SlotSealed(slot)) if slot == 0));
+            // slot 0 is sealed, with no cvc return sealed error
+            let slot_keys = sc.dump(0, None).await;
+            assert!(matches!(slot_keys, Err(Error::SlotSealed(slot)) if slot == 0));
+            // unseal slot 0
+            sc.unseal(0, "123456").await.unwrap();
+            // slot 0 is unsealed, with cvc return privkey
+            let slot_keys = sc.dump(0, Some("123456".to_string())).await;
+            assert!(slot_keys.is_ok());
+            assert!(matches!(slot_keys, Ok((Some(_), _))));
+            let slot_keys = slot_keys.unwrap();
+            // verify pubkey matches pubkey derived from decrypted private key
+            let pubkey_from_privkey = slot_keys.0.unwrap().public_key(&sc.secp);
+            assert_eq!(pubkey_from_privkey, slot_keys.1);
+            // slot 0 is unsealed, with no cvc don't return privkey
+            let slot_keys = sc.dump(0, None).await;
+            assert!(slot_keys.is_ok());
+            assert!(matches!(slot_keys, Ok((None, _))));
+            // slot 1 is unused, with cvc return unused error
+            let dump_response = sc.dump(1, Some("123456".to_string())).await;
+            assert!(matches!(dump_response, Err(Error::SlotUnused(slot)) if slot == 1));
+            // slot 1 is unused, with no cvc also return unused error
+            let dump_response = sc.dump(1, None).await;
+            assert!(matches!(dump_response, Err(Error::SlotUnused(slot)) if slot == 1));
+        }
         drop(python);
     }
 }

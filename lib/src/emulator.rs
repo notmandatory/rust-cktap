@@ -137,7 +137,7 @@ pub mod test {
     pub async fn test_transmit() {
         let pipe_path = Path::new("/tmp/test-transmit-pipe");
         let _python = EcardSubprocess::new(pipe_path, &CardTypeOption::SatsCard).unwrap();
-        let emulator = find_emulator(pipe_path).await.unwrap();
-        dbg!(emulator);
+        let emulator = find_emulator(pipe_path).await;
+        assert!(emulator.is_ok());
     }
 }

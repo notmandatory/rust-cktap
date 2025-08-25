@@ -41,6 +41,15 @@ pub enum Error {
     Psbt(String),
     #[error("Sign PSBT: {0}")]
     SignPsbt(String),
+    #[error("Slot is sealed: {0}")]
+    SlotSealed(u8),
+    #[error("Slot is unused: {0}")]
+    SlotUnused(u8),
+    /// If the slot was unsealed due to confusion or uncertainty about its status.
+    /// In other words, if the card unsealed itself rather than via a
+    /// successful `unseal` command.
+    #[error("Slot was unsealed improperly: {0}")]
+    SlotTampered(u8),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
@@ -952,7 +961,7 @@ pub struct DumpResponse {
     /// public key, 33 bytes
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub pubkey: Vec<u8>,
+    pub pubkey: Option<Vec<u8>>,
     /// nonce provided by customer originally
     #[serde(with = "serde_bytes")]
     #[serde(default)]
