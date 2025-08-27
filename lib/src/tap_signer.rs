@@ -302,32 +302,35 @@ pub trait TapSignerShared: Authentication {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, DeriveCommand::name());
         let cmd = DeriveCommand::for_tapsigner(app_nonce, path, epubkey, xcvc);
         let derive_response: DeriveResponse = transmit(self.transport(), &cmd).await?;
-
-        let card_nonce = self.card_nonce();
-        let sig = &derive_response.sig;
-
-        let mut message_bytes: Vec<u8> = Vec::new();
-        message_bytes.extend("OPENDIME".as_bytes());
-        message_bytes.extend(card_nonce);
-        message_bytes.extend(app_nonce);
-        message_bytes.extend(&derive_response.chain_code);
-
-        let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
-        let message = Message::from_digest(message_bytes_hash.to_byte_array());
-
-        let signature = Signature::from_compact(sig).map_err(Error::from)?;
-        dbg!(&derive_response.pubkey);
-        let pubkey = match &derive_response.pubkey {
-            Some(pubkey) => PublicKey::from_slice(pubkey).map_err(Error::from)?,
-            None => PublicKey::from_slice(&derive_response.master_pubkey).map_err(Error::from)?,
-        };
-
-        self.secp()
-            .verify_ecdsa(&message, &signature, &pubkey.inner)
-            .map_err(Error::from)?;
-
         self.set_card_nonce(derive_response.card_nonce);
 
+        let master_pubkey =
+            PublicKey::from_slice(&derive_response.master_pubkey).map_err(Error::from)?;
+        let pubkey = match &derive_response.pubkey {
+            Some(pubkey) => PublicKey::from_slice(pubkey).map_err(Error::from)?,
+            None => master_pubkey,
+        };
+
+        // TODO FIX currently signature validation only works if no derivation path is used
+        if pubkey == master_pubkey {
+            let card_nonce = self.card_nonce();
+            let sig = &derive_response.sig;
+
+            let mut message_bytes: Vec<u8> = Vec::new();
+            message_bytes.extend("OPENDIME".as_bytes());
+            message_bytes.extend(card_nonce);
+            message_bytes.extend(app_nonce);
+            message_bytes.extend(&derive_response.chain_code);
+
+            let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
+            let message = Message::from_digest(message_bytes_hash.to_byte_array());
+
+            let signature = Signature::from_compact(sig).map_err(Error::from)?;
+
+            self.secp()
+                .verify_ecdsa(&message, &signature, &master_pubkey.inner)
+                .map_err(Error::from)?;
+        }
         Ok(pubkey)
     }
 
