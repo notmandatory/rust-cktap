@@ -1,9 +1,3 @@
-use async_trait::async_trait;
-use bitcoin::secp256k1::{All, Message, Secp256k1, ecdsa::Signature};
-use bitcoin::{Address, Network, PrivateKey, PublicKey};
-use bitcoin_hashes::sha256;
-use std::sync::Arc;
-
 use crate::Error;
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, NewCommand,
@@ -12,8 +6,15 @@ use crate::apdu::{
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
 use crate::error::CkTapError;
 use crate::tap_signer::PsbtSignError;
+use async_trait::async_trait;
+use bitcoin::bip32::{ChainCode, DerivationPath, Fingerprint, Xpub};
 use bitcoin::secp256k1;
+use bitcoin::secp256k1::{All, Message, Secp256k1, ecdsa::Signature};
+use bitcoin::{Address, CompressedPublicKey, Network, NetworkKind, PrivateKey, PublicKey};
 use bitcoin_hashes::hex::DisplayHex;
+use bitcoin_hashes::sha256;
+use std::str::FromStr;
+use std::sync::Arc;
 
 pub struct SatsCard {
     pub transport: Arc<dyn CkTransport>,
@@ -112,40 +113,68 @@ impl SatsCard {
     /// when they created the current slot, see: [`Self::new_slot`].
     ///
     /// Ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive
-    pub async fn derive(&mut self) -> Result<[u8; 32], Error> {
-        let nonce = crate::rand_nonce();
+    pub async fn derive(&mut self) -> Result<ChainCode, Error> {
+        let app_nonce = crate::rand_nonce();
         let card_nonce = *self.card_nonce();
 
-        let cmd = DeriveCommand::for_satscard(nonce);
-        let resp: DeriveResponse = transmit(self.transport(), &cmd).await?;
-        self.set_card_nonce(resp.card_nonce);
+        let cmd = DeriveCommand::for_satscard(app_nonce);
+        let derive_response: DeriveResponse = transmit(self.transport(), &cmd).await?;
+        self.set_card_nonce(derive_response.card_nonce);
 
         // Verify signature
         let mut message_bytes: Vec<u8> = Vec::new();
         message_bytes.extend("OPENDIME".as_bytes());
         message_bytes.extend(card_nonce);
-        message_bytes.extend(nonce);
-        message_bytes.extend(resp.chain_code);
+        message_bytes.extend(app_nonce);
+        message_bytes.extend(derive_response.chain_code);
 
         let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
         let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
-        let signature = Signature::from_compact(&resp.sig)?;
+        let signature = Signature::from_compact(&derive_response.sig)?;
 
-        let master_pubkey = PublicKey::from_slice(&resp.master_pubkey).map_err(Error::from)?;
+        let master_pubkey =
+            PublicKey::from_slice(&derive_response.master_pubkey).map_err(Error::from)?;
         self.secp()
             .verify_ecdsa(&message, &signature, &master_pubkey.inner)?;
 
-        // return card chain code so user can verify it matches user provided chain code
-        let card_chaincode = &resp.chain_code;
+        // response chain code, user should verify it matches the chain code they provided
+        let response_chaincode = &derive_response.chain_code;
 
-        // TODO verify a user's chain code (entropy) was used in picking the private key
         // SATSCARD returns the card's chain code and master public key
         // With the master pubkey and the chain code, reconstructs a BIP-32 XPUB (extended public key)
         // and verify it matches the payment address the card shares (i.e., the slot's pubkey)
         // it must equal the BIP-32 derived key (m/0) constructed from that XPUB.
+        let card_chaincode = ChainCode::from(*response_chaincode);
+        let xpub = Xpub {
+            network: NetworkKind::Main,
+            depth: 0,
+            parent_fingerprint: Fingerprint::default(), // No parent for master key
+            child_number: bitcoin::bip32::ChildNumber::from_normal_idx(0).unwrap(),
+            public_key: master_pubkey.inner,
+            chain_code: card_chaincode,
+        };
 
-        Ok(*card_chaincode)
+        // Derive the child key at path m/0
+        let derivation_path = DerivationPath::from_str("m/0").unwrap();
+        let derived_xpub = xpub.derive_pub(self.secp(), &derivation_path).unwrap();
+
+        // Create a compressed public key for address generation
+        let bitcoin_pubkey = CompressedPublicKey(derived_xpub.public_key);
+
+        // P2WPKH (Native SegWit address starting with 'bc1')
+        let p2wpkh_address = Address::p2wpkh(&bitcoin_pubkey, Network::Bitcoin).to_string();
+        let self_addr = self.addr.clone().unwrap();
+
+        // if derived address and card address don't match then chaincode in response was not used
+        if !(p2wpkh_address[..12] == self_addr[..12]
+            && p2wpkh_address[p2wpkh_address.len().saturating_sub(12)..]
+                == self_addr[self_addr.len().saturating_sub(12)..])
+        {
+            return Err(Error::InvalidChaincode);
+        }
+
+        Ok(card_chaincode)
     }
 
     /// Unseal a slot.
