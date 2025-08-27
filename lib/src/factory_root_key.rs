@@ -1,4 +1,4 @@
-use crate::apdu::Error;
+use crate::Error;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin_hashes::hex::DisplayHex;
 use std::convert::TryFrom;

@@ -63,7 +63,7 @@ impl SatsCard {
             .await
             .read(None)
             .await
-            .map(|pk| pk.serialize().to_vec())
+            .map(|pk| pk.to_bytes().to_vec())
             .map_err(|e| CkTapError::Core { msg: e.to_string() })
     }
     // TODO implement the rest of the commands
@@ -84,7 +84,7 @@ impl TapSigner {
             .await
             .read(Some(cvc))
             .await
-            .map(|pk| pk.serialize().to_vec())
+            .map(|pk| pk.to_bytes().to_vec())
             .map_err(|e| CkTapError::Core { msg: e.to_string() })
     }
     // TODO implement the rest of the commands
@@ -105,7 +105,7 @@ impl SatsChip {
             .await
             .read(None)
             .await
-            .map(|pk| pk.serialize().to_vec())
+            .map(|pk| pk.to_bytes().to_vec())
             .map_err(|e| CkTapError::Core { msg: e.to_string() })
     }
     // TODO implement the rest of the commands

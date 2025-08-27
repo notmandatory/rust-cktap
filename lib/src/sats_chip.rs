@@ -1,8 +1,10 @@
 use async_trait::async_trait;
-use bitcoin::secp256k1::{All, PublicKey, Secp256k1};
+use bitcoin::PublicKey;
+use bitcoin::secp256k1::{All, Secp256k1};
 use std::sync::Arc;
 
-use crate::apdu::{Error, StatusResponse};
+use crate::Error;
+use crate::apdu::StatusResponse;
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
 use crate::tap_signer::TapSignerShared;
 
@@ -67,7 +69,7 @@ impl SatsChip {
         status_response: StatusResponse,
     ) -> Result<Self, Error> {
         let pubkey = status_response.pubkey.as_slice();
-        let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+        let pubkey = PublicKey::from_slice(pubkey).map_err(Error::from)?;
 
         Ok(SatsChip {
             transport,

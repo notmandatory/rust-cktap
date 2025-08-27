@@ -1,6 +1,6 @@
-use crate::CkTapCard;
-use crate::apdu::{AppletSelect, CommandApdu, Error, StatusCommand};
+use crate::apdu::{AppletSelect, CommandApdu, StatusCommand};
 use crate::commands::{CkTransport, to_cktap};
+use crate::{CkTapCard, Error};
 use async_trait::async_trait;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;

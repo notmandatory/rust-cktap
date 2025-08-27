@@ -6,9 +6,9 @@ use rust_cktap::commands::{Authentication, Read, Wait};
 use rust_cktap::emulator;
 #[cfg(not(feature = "emulator"))]
 use rust_cktap::pcsc;
-use rust_cktap::secp256k1::rand;
+use rust_cktap::rand;
 use rust_cktap::tap_signer::TapSignerShared;
-use rust_cktap::{CkTapCard, Psbt, apdu::Error, commands::Certificate, rand_chaincode};
+use rust_cktap::{CkTapCard, Error, Psbt, commands::Certificate, rand_chaincode};
 use std::io;
 use std::io::Write;
 #[cfg(feature = "emulator")]
@@ -78,7 +78,7 @@ enum TapSignerCommand {
     Derive {
         /// path, eg. for 84'/0'/0'/* use 84,0,0
         #[clap(short, long, value_delimiter = ',', num_args = 1..)]
-        path: Vec<u32>,
+        path: Option<Vec<u32>>,
     },
     /// Get an encrypted backup of the card's private key
     Backup,
@@ -114,7 +114,7 @@ enum SatsChipCommand {
     Derive {
         /// path, eg. for 84'/0'/0'/* use 84,0,0
         #[clap(short, long, value_delimiter = ',', num_args = 1..)]
-        path: Vec<u32>,
+        path: Option<Vec<u32>>,
     },
     /// Change the PIN (CVC) used for card authentication to a new user provided one
     Change { new_cvc: String },
@@ -155,7 +155,7 @@ async fn main() -> Result<(), Error> {
                 SatsCardCommand::Unseal => {
                     let slot = sc.slot().expect("current slot number");
                     let (privkey, pubkey) = &sc.unseal(slot, &cvc()).await?;
-                    println!("privkey: {}, pubkey: {pubkey}", privkey.display_secret())
+                    println!("privkey: {}, pubkey: {pubkey}", privkey.to_wif())
                 }
                 SatsCardCommand::Sign { slot, psbt } => {
                     let psbt = Psbt::from_str(&psbt).map_err(|e| Error::Psbt(e.to_string()))?;
@@ -191,7 +191,9 @@ async fn main() -> Result<(), Error> {
                     dbg!(response);
                 }
                 TapSignerCommand::Derive { path } => {
-                    dbg!(&ts.derive(&path, &cvc()).await);
+                    // let test_path:Vec<usize> = ts.path.clone().unwrap().iter().map(|p| p ^ (1 << 31)).collect();
+                    // dbg!(test_path);
+                    dbg!(&ts.derive(path.unwrap_or_default(), &cvc()).await);
                 }
 
                 TapSignerCommand::Backup => {
@@ -205,8 +207,7 @@ async fn main() -> Result<(), Error> {
                 }
                 TapSignerCommand::Sign { to_sign } => {
                     let digest: [u8; 32] =
-                        rust_cktap::bitcoin_hashes::sha256::Hash::hash(to_sign.as_bytes())
-                            .to_byte_array();
+                        rust_cktap::Hash::hash(to_sign.as_bytes()).to_byte_array();
 
                     let response = &ts.sign(digest, vec![], &cvc()).await;
                     println!("{response:?}");
@@ -228,7 +229,7 @@ async fn main() -> Result<(), Error> {
                     dbg!(response);
                 }
                 SatsChipCommand::Derive { path } => {
-                    dbg!(&sc.derive(&path, &cvc()).await);
+                    dbg!(&sc.derive(path.unwrap_or_default(), &cvc()).await);
                 }
 
                 SatsChipCommand::Change { new_cvc } => {
@@ -237,8 +238,7 @@ async fn main() -> Result<(), Error> {
                 }
                 SatsChipCommand::Sign { to_sign } => {
                     let digest: [u8; 32] =
-                        rust_cktap::bitcoin_hashes::sha256::Hash::hash(to_sign.as_bytes())
-                            .to_byte_array();
+                        rust_cktap::Hash::hash(to_sign.as_bytes()).to_byte_array();
 
                     let response = &sc.sign(digest, vec![], &cvc()).await;
                     println!("{response:?}");

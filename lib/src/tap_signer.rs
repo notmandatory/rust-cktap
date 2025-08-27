@@ -1,13 +1,14 @@
-use crate::BIP32_HARDENED_MASK;
 use crate::apdu::{
-    CommandApdu as _, DeriveCommand, DeriveResponse, Error, NewCommand, NewResponse, SignCommand,
+    CommandApdu as _, DeriveCommand, DeriveResponse, NewCommand, NewResponse, SignCommand,
     SignResponse, StatusCommand, StatusResponse,
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
+use crate::{BIP32_HARDENED_MASK, Error};
 use async_trait::async_trait;
+use bitcoin::PublicKey;
 use bitcoin::hex::DisplayHex;
-use bitcoin::secp256k1::{self, All, Message, PublicKey, Secp256k1, ecdsa::Signature};
+use bitcoin::secp256k1::{self, All, Message, Secp256k1, ecdsa::Signature};
 use bitcoin_hashes::sha256;
 use log::error;
 use std::sync::Arc;
@@ -151,7 +152,7 @@ pub trait TapSignerShared: Authentication {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, SignCommand::name());
 
         // Use the same session key to encrypt the new CVC
-        let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+        let session_key = secp256k1::ecdh::SharedSecret::new(&self.pubkey().inner, &eprivkey);
 
         // encrypt the new cvc by XORing with the session key
         let xdigest_vec: Vec<u8> = session_key
@@ -170,7 +171,7 @@ pub trait TapSignerShared: Authentication {
             transmit(self.transport(), &sign_command).await;
 
         let mut unlucky_number_retries = 0;
-        while let Err(Error::CkTap(crate::apdu::CkTapError::UnluckyNumber)) = sign_response {
+        while let Err(Error::CkTap(crate::CkTapError::UnluckyNumber)) = sign_response {
             let sign_command =
                 SignCommand::for_tapsigner(sub_path.clone(), xdigest, epubkey, xcvc.clone());
 
@@ -260,7 +261,7 @@ pub trait TapSignerShared: Authentication {
                     .map(|p| p ^ BIP32_HARDENED_MASK)
                     .take(BIP84_HARDENED_SUBPATH.len())
                     .collect();
-                let derive_response = self.derive(&path, cvc).await;
+                let derive_response = self.derive(path, cvc).await;
                 if derive_response.is_err() {
                     return Err(Error::PubkeyMismatch(input_index));
                 }
@@ -294,9 +295,9 @@ pub trait TapSignerShared: Authentication {
     /// mobile wallet.
     ///
     /// Ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#tapsigner-performs-subkey-derivation
-    async fn derive(&mut self, path: &[u32], cvc: &str) -> Result<PublicKey, TapSignerError> {
+    async fn derive(&mut self, path: Vec<u32>, cvc: &str) -> Result<PublicKey, TapSignerError> {
         // set most significant bit to 1 to represent hardened path steps
-        let path = path.iter().map(|p| p ^ (1 << 31)).collect();
+        let path = path.iter().map(|p| p ^ (1 << 31)).collect::<Vec<_>>();
         let app_nonce = crate::rand_nonce();
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, DeriveCommand::name());
         let cmd = DeriveCommand::for_tapsigner(app_nonce, path, epubkey, xcvc);
@@ -315,13 +316,14 @@ pub trait TapSignerShared: Authentication {
         let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
         let signature = Signature::from_compact(sig).map_err(Error::from)?;
+        dbg!(&derive_response.pubkey);
         let pubkey = match &derive_response.pubkey {
             Some(pubkey) => PublicKey::from_slice(pubkey).map_err(Error::from)?,
             None => PublicKey::from_slice(&derive_response.master_pubkey).map_err(Error::from)?,
         };
 
         self.secp()
-            .verify_ecdsa(&message, &signature, &pubkey)
+            .verify_ecdsa(&message, &signature, &pubkey.inner)
             .map_err(Error::from)?;
 
         self.set_card_nonce(derive_response.card_nonce);
@@ -347,7 +349,7 @@ pub trait TapSignerShared: Authentication {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, ChangeCommand::name());
 
         // Use the same session key to encrypt the new CVC
-        let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+        let session_key = secp256k1::ecdh::SharedSecret::new(&self.pubkey().inner, &eprivkey);
 
         // encrypt the new cvc by XORing with the session key
         let xnew_cvc: Vec<u8> = session_key
@@ -373,7 +375,7 @@ impl TapSigner {
         status_response: StatusResponse,
     ) -> Result<Self, Error> {
         let pubkey = status_response.pubkey.as_slice();
-        let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+        let pubkey = PublicKey::from_slice(pubkey).map_err(Error::from)?;
 
         Ok(TapSigner {
             transport,

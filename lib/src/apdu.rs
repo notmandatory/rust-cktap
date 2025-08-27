@@ -2,150 +2,22 @@
 /// reader and a smart card. This file defines the Coinkite APDU and set of command/responses.
 pub mod tap_signer;
 
-use bitcoin::secp256k1::{
-    self, PublicKey, SecretKey, XOnlyPublicKey, ecdh::SharedSecret, ecdsa::Signature,
-};
+use crate::error::ErrorResponse;
+use crate::{CkTapError, Error};
+use bitcoin::secp256k1::{self, ecdh::SharedSecret, ecdsa::Signature};
+use bitcoin::{Network, PrivateKey, PublicKey};
 use bitcoin_hashes::hex::DisplayHex;
 use ciborium::de::from_reader;
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
-use serde;
 use serde::{Deserialize, Serialize, Serializer};
+use serde_bytes::ByteBuf;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 
 const APP_ID: [u8; 15] = *b"\xf0CoinkiteCARDv1";
 const SELECT_CLA_INS_P1P2: [u8; 4] = [0x00, 0xA4, 0x04, 0x00];
 const CBOR_CLA_INS_P1P2: [u8; 4] = [0x00, 0xCB, 0x00, 0x00];
-
-// Errors
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum Error {
-    #[error("CiborDe: {0}")]
-    CiborDe(String),
-    #[error("CiborValue: {0}")]
-    CiborValue(String),
-    #[error("CkTap: {0:?}")]
-    CkTap(CkTapError),
-    #[error("IncorrectSignature: {0}")]
-    IncorrectSignature(String),
-    #[error("Root cert is not from Coinkite. Card is counterfeit: {0}")]
-    InvalidRootCert(String),
-    #[error("Card chain code doesn't match user provided chain code")]
-    InvalidChaincode,
-    #[error("UnknownCardType: {0}")]
-    UnknownCardType(String),
-    #[error("Transport: {0}")]
-    Transport(String),
-    #[error("PSBT: {0}")]
-    Psbt(String),
-    #[error("Sign PSBT: {0}")]
-    SignPsbt(String),
-    #[error("Slot is sealed: {0}")]
-    SlotSealed(u8),
-    #[error("Slot is unused: {0}")]
-    SlotUnused(u8),
-    /// If the slot was unsealed due to confusion or uncertainty about its status.
-    /// In other words, if the card unsealed itself rather than via a
-    /// successful `unseal` command.
-    #[error("Slot was unsealed improperly: {0}")]
-    SlotTampered(u8),
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum CkTapError {
-    #[error("Rare or unlucky value used/occurred. Start again")]
-    UnluckyNumber,
-    #[error("Invalid/incorrect/incomplete arguments provided to command")]
-    BadArguments,
-    #[error("Authentication details (CVC/epubkey) are wrong")]
-    BadAuth,
-    #[error("Command requires auth, and none was provided")]
-    NeedsAuth,
-    #[error("The 'cmd' field is an unsupported command")]
-    UnknownCommand,
-    #[error("Command is not valid at this time, no point retrying")]
-    InvalidCommand,
-    #[error("You can't do that right now when card is in this state")]
-    InvalidState,
-    #[error("Nonce is not unique-looking enough")]
-    WeakNonce,
-    #[error("Unable to decode CBOR data stream")]
-    BadCBOR,
-    #[error("Can't change CVC without doing a backup first")]
-    BackupFirst,
-    #[error("Due to auth failures, delay required")]
-    RateLimited,
-}
-
-impl CkTapError {
-    pub fn error_from_code(code: u16) -> Option<CkTapError> {
-        match code {
-            205 => Some(CkTapError::UnluckyNumber),
-            400 => Some(CkTapError::BadArguments),
-            401 => Some(CkTapError::BadAuth),
-            403 => Some(CkTapError::NeedsAuth),
-            404 => Some(CkTapError::UnknownCommand),
-            405 => Some(CkTapError::InvalidCommand),
-            406 => Some(CkTapError::InvalidState),
-            417 => Some(CkTapError::WeakNonce),
-            422 => Some(CkTapError::BadCBOR),
-            425 => Some(CkTapError::BackupFirst),
-            429 => Some(CkTapError::RateLimited),
-            _ => None,
-        }
-    }
-
-    pub fn error_code(&self) -> u16 {
-        match self {
-            CkTapError::UnluckyNumber => 205,
-            CkTapError::BadArguments => 400,
-            CkTapError::BadAuth => 401,
-            CkTapError::NeedsAuth => 403,
-            CkTapError::UnknownCommand => 404,
-            CkTapError::InvalidCommand => 405,
-            CkTapError::InvalidState => 406,
-            CkTapError::WeakNonce => 417,
-            CkTapError::BadCBOR => 422,
-            CkTapError::BackupFirst => 425,
-            CkTapError::RateLimited => 429,
-        }
-    }
-}
-
-impl<T> From<ciborium::de::Error<T>> for Error
-where
-    T: Debug,
-{
-    fn from(e: ciborium::de::Error<T>) -> Self {
-        Error::CiborDe(e.to_string())
-    }
-}
-
-impl From<ciborium::value::Error> for Error {
-    fn from(e: ciborium::value::Error) -> Self {
-        Error::CiborValue(e.to_string())
-    }
-}
-
-impl From<secp256k1::Error> for Error {
-    fn from(e: secp256k1::Error) -> Self {
-        Error::IncorrectSignature(e.to_string())
-    }
-}
-
-#[cfg(feature = "pcsc")]
-impl From<pcsc::Error> for Error {
-    fn from(e: pcsc::Error) -> Self {
-        Error::Transport(e.to_string())
-    }
-}
-
-#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ErrorResponse {
-    pub error: String,
-    pub code: u16,
-}
 
 // Apdu Traits
 pub trait CommandApdu {
@@ -281,7 +153,7 @@ pub struct ReadCommand {
 }
 
 impl ReadCommand {
-    pub fn authenticated(nonce: [u8; 16], epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn authenticated(nonce: [u8; 16], epubkey: secp256k1::PublicKey, xcvc: Vec<u8>) -> Self {
         ReadCommand {
             cmd: Self::name(),
             nonce,
@@ -318,31 +190,30 @@ impl CommandApdu for ReadCommand {
 pub struct ReadResponse {
     /// signature over a bunch of fields using private key of slot, 64 bytes
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>,
+    sig: Vec<u8>,
     /// public key for this slot/derivation, 33 bytes
     #[serde(with = "serde_bytes")]
-    pub pubkey: Vec<u8>,
+    pubkey: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: [u8; 16],
+    pub(crate) card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for ReadResponse {}
 
 impl ReadResponse {
     pub fn signature(&self) -> Result<Signature, Error> {
-        Signature::from_compact(self.sig.as_slice()).map_err(|e| Error::CiborValue(e.to_string()))
+        Signature::from_compact(self.sig.as_slice()).map_err(Error::from)
     }
 
     pub fn pubkey(&self, session_key: Option<SharedSecret>) -> Result<PublicKey, Error> {
         if let Some(sk) = session_key {
             let pubkey_bytes = unzip(&self.pubkey, sk);
-            return PublicKey::from_slice(pubkey_bytes.as_slice())
-                .map_err(|e| Error::CiborValue(e.to_string()));
+            return PublicKey::from_slice(pubkey_bytes.as_slice()).map_err(Error::from);
         };
 
         let pubkey_bytes = self.pubkey.as_slice();
-        PublicKey::from_slice(pubkey_bytes).map_err(|e| Error::CiborValue(e.to_string()))
+        PublicKey::from_slice(pubkey_bytes).map_err(Error::from)
     }
 }
 
@@ -381,7 +252,11 @@ pub struct DeriveCommand {
     /// provided by app, cannot be all same byte (& should be random), 16 bytes
     #[serde(with = "serde_bytes")]
     nonce: [u8; 16],
-    path: Vec<u32>, // tapsigner: empty list for `m` case (a no-op)
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_some"
+    )]
+    path: Option<Vec<u32>>, // tapsigner: empty list for `m` case (a no-op)
     /// app's ephemeral public key, 33 bytes
     #[serde(with = "serde_bytes")]
     epubkey: Option<[u8; 33]>,
@@ -401,7 +276,7 @@ impl DeriveCommand {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
-            path: vec![],
+            path: None,
             epubkey: None,
             xcvc: None,
         }
@@ -410,13 +285,13 @@ impl DeriveCommand {
     pub fn for_tapsigner(
         nonce: [u8; 16],
         path: Vec<u32>,
-        epubkey: PublicKey,
+        epubkey: secp256k1::PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         DeriveCommand {
             cmd: Self::name(),
             nonce,
-            path,
+            path: Some(path),
             epubkey: Some(epubkey.serialize()),
             xcvc: Some(xcvc),
         }
@@ -485,8 +360,7 @@ impl Default for CertsCommand {
 #[derive(Deserialize, Clone)]
 pub struct CertsResponse {
     /// list of certificates, from 'batch' to 'root'
-    // TODO create custom deserializer like "serde_bytes" but for Vec<Vec<u8>>
-    cert_chain: Vec<Value>,
+    cert_chain: Vec<ByteBuf>,
 }
 
 impl ResponseApdu for CertsResponse {}
@@ -496,10 +370,7 @@ impl CertsResponse {
         self.clone()
             .cert_chain
             .into_iter()
-            .filter_map(|v| match v {
-                Value::Bytes(bv) => Some(bv),
-                _ => None,
-            })
+            .map(|bb| bb.to_vec())
             .collect()
     }
 }
@@ -551,10 +422,10 @@ impl CheckCommand {
 pub struct CheckResponse {
     /// signature using card_pubkey, 64 bytes
     #[serde(with = "serde_bytes")]
-    pub auth_sig: Vec<u8>,
+    pub(crate) auth_sig: Vec<u8>,
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
-    pub card_nonce: [u8; 16],
+    pub(crate) card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for CheckResponse {}
@@ -569,6 +440,7 @@ impl Debug for CheckResponse {
 }
 
 /// nfc command to return dynamic url for NFC-enabled smart phone
+#[allow(unused)]
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcCommand {
     cmd: &'static str,
@@ -592,14 +464,14 @@ impl CommandApdu for NfcCommand {
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcResponse {
     /// command result
-    pub url: String,
+    url: String,
 }
 
 impl ResponseApdu for NfcResponse {}
 
 // This function is needed because the subpath field can only be included (and not as an Option)
 // when signing with a TAPSIGNER and NOT with a SATSCARD.
-fn serialize_some<T, S>(opt: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+pub(crate) fn serialize_some<T, S>(opt: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
 where
     T: Serialize,
     S: Serializer,
@@ -633,7 +505,12 @@ pub struct SignCommand {
 }
 
 impl SignCommand {
-    pub fn for_satscard(slot: u8, digest: [u8; 32], epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn for_satscard(
+        slot: u8,
+        digest: [u8; 32],
+        epubkey: secp256k1::PublicKey,
+        xcvc: Vec<u8>,
+    ) -> Self {
         SignCommand {
             cmd: Self::name(),
             slot: Some(slot),
@@ -647,7 +524,7 @@ impl SignCommand {
     pub fn for_tapsigner(
         sub_path: Vec<u32>,
         digest: [u8; 32],
-        epubkey: PublicKey,
+        epubkey: secp256k1::PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         SignCommand {
@@ -723,10 +600,10 @@ pub struct WaitCommand {
 }
 
 impl WaitCommand {
-    pub fn new(epubkey: Option<[u8; 33]>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(epubkey: Option<secp256k1::PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
         WaitCommand {
             cmd: Self::name(),
-            epubkey,
+            epubkey: epubkey.map(|pk| pk.serialize()),
             xcvc,
         }
     }
@@ -744,10 +621,10 @@ impl CommandApdu for WaitCommand {
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct WaitResponse {
     /// command result
-    pub success: bool,
+    success: bool,
     /// how much more delay is now required
     #[serde(default)]
-    pub auth_delay: usize,
+    pub(crate) auth_delay: usize,
 }
 
 impl ResponseApdu for WaitResponse {}
@@ -780,7 +657,7 @@ impl NewCommand {
     pub fn new(
         slot: Option<u8>,
         chain_code: Option<[u8; 32]>,
-        epubkey: PublicKey,
+        epubkey: secp256k1::PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         let slot = slot.unwrap_or_default();
@@ -815,10 +692,10 @@ impl CommandApdu for NewCommand {
 #[derive(Deserialize, Clone, Debug)]
 pub struct NewResponse {
     /// slot just made
-    pub slot: u8,
+    pub(crate) slot: u8,
     /// new nonce value, for NEXT command (not this one)
     #[serde(with = "serde_bytes")]
-    pub card_nonce: [u8; 16], // 16 bytes
+    pub(crate) card_nonce: [u8; 16], // 16 bytes
 }
 
 impl ResponseApdu for NewResponse {}
@@ -848,7 +725,7 @@ pub struct UnsealCommand {
 }
 
 impl UnsealCommand {
-    pub fn new(slot: u8, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn new(slot: u8, epubkey: secp256k1::PublicKey, xcvc: Vec<u8>) -> Self {
         UnsealCommand {
             cmd: Self::name(),
             slot,
@@ -880,8 +757,9 @@ pub struct UnsealResponse {
     #[serde(with = "serde_bytes")]
     pub master_pk: Vec<u8>,
     /// nonce provided by customer
+    #[allow(unused)]
     #[serde(with = "serde_bytes")]
-    pub chain_code: Vec<u8>,
+    pub chain_code: Vec<u8>, // TODO verify this is same as selected by app
     /// new nonce value, for NEXT command (not this one), 16 bytes
     #[serde(with = "serde_bytes")]
     pub card_nonce: [u8; 16],
@@ -891,13 +769,13 @@ impl ResponseApdu for UnsealResponse {}
 
 impl fmt::Display for UnsealResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let master = XOnlyPublicKey::from_slice(self.master_pk.as_slice()).unwrap();
+        let master = PublicKey::from_slice(self.master_pk.as_slice()).unwrap();
         let pubkey = PublicKey::from_slice(self.pubkey.as_slice()).unwrap();
-        let privkey = SecretKey::from_slice(self.privkey.as_slice()).unwrap();
+        let privkey = PrivateKey::from_slice(self.privkey.as_slice(), Network::Bitcoin).unwrap();
         writeln!(f, "slot: {}", self.slot)?;
         writeln!(f, "master_pk: {master}")?;
         writeln!(f, "pubkey: {pubkey}")?;
-        writeln!(f, "privkey: {}", privkey.display_secret())
+        writeln!(f, "privkey: {}", privkey.to_wif())
     }
 }
 
@@ -929,7 +807,7 @@ pub struct DumpCommand {
 }
 
 impl DumpCommand {
-    pub fn new(slot: u8, epubkey: Option<PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
+    pub fn new(slot: u8, epubkey: Option<secp256k1::PublicKey>, xcvc: Option<Vec<u8>>) -> Self {
         DumpCommand {
             cmd: Self::name(),
             slot,
@@ -952,6 +830,7 @@ impl CommandApdu for DumpCommand {
 #[derive(Deserialize, Clone, Debug)]
 pub struct DumpResponse {
     /// slot just made
+    #[allow(unused)] // TODO verify this is correct slot
     pub slot: usize,
     /// private key for spending (for addr), 32 bytes
     /// The private keys are encrypted, XORed with the session key
@@ -963,10 +842,12 @@ pub struct DumpResponse {
     #[serde(default)]
     pub pubkey: Option<Vec<u8>>,
     /// nonce provided by customer originally
+    #[allow(unused)] // TODO verify this is correct chain_code
     #[serde(with = "serde_bytes")]
     #[serde(default)]
     pub chain_code: Option<Vec<u8>>,
     /// master private key for this slot (was picked by card), 32 bytes
+    #[allow(unused)] // TODO verify this is correct pubkey
     #[serde(with = "serde_bytes")]
     #[serde(default)]
     pub master_pk: Option<Vec<u8>>,
@@ -979,6 +860,7 @@ pub struct DumpResponse {
     /// if no xcvc provided, slot sealed status
     pub sealed: Option<bool>,
     /// if no xcvc provided, full payment address (not censored)
+    #[allow(unused)] // TODO verify this is correct address
     #[serde(default)]
     pub addr: Option<String>,
     /// new nonce value, for NEXT command (not this one), 16 bytes

@@ -1,18 +1,18 @@
 use async_trait::async_trait;
-use bitcoin::key::CompressedPublicKey as BitcoinPublicKey;
-use bitcoin::secp256k1::{All, Message, PublicKey, Secp256k1, SecretKey, ecdsa::Signature};
-use bitcoin::{Address, Network};
+use bitcoin::secp256k1::{All, Message, Secp256k1, ecdsa::Signature};
+use bitcoin::{Address, Network, PrivateKey, PublicKey};
 use bitcoin_hashes::sha256;
 use std::sync::Arc;
 
+use crate::Error;
 use crate::apdu::{
-    CkTapError, CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, Error,
-    NewCommand, NewResponse, SignCommand, SignResponse, StatusResponse, UnsealCommand,
-    UnsealResponse,
+    CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, NewCommand,
+    NewResponse, SignCommand, SignResponse, StatusResponse, UnsealCommand, UnsealResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
-use crate::secp256k1;
+use crate::error::CkTapError;
 use crate::tap_signer::PsbtSignError;
+use bitcoin::secp256k1;
 use bitcoin_hashes::hex::DisplayHex;
 
 pub struct SatsCard {
@@ -68,7 +68,7 @@ impl SatsCard {
         status_response: StatusResponse,
     ) -> Result<Self, Error> {
         let pubkey = status_response.pubkey.as_slice();
-        let pubkey = PublicKey::from_slice(pubkey).map_err(|e| Error::CiborValue(e.to_string()))?;
+        let pubkey = PublicKey::from_slice(pubkey).map_err(Error::from)?;
 
         let slots = status_response
             .slots
@@ -132,9 +132,9 @@ impl SatsCard {
 
         let signature = Signature::from_compact(&resp.sig)?;
 
-        let master_pubkey = PublicKey::from_slice(&resp.master_pubkey)?;
+        let master_pubkey = PublicKey::from_slice(&resp.master_pubkey).map_err(Error::from)?;
         self.secp()
-            .verify_ecdsa(&message, &signature, &master_pubkey)?;
+            .verify_ecdsa(&message, &signature, &master_pubkey.inner)?;
 
         // return card chain code so user can verify it matches user provided chain code
         let card_chaincode = &resp.chain_code;
@@ -151,7 +151,7 @@ impl SatsCard {
     /// Unseal a slot.
     ///
     /// Returns the private and corresponding public keys for that slot.
-    pub async fn unseal(&mut self, slot: u8, cvc: &str) -> Result<(SecretKey, PublicKey), Error> {
+    pub async fn unseal(&mut self, slot: u8, cvc: &str) -> Result<(PrivateKey, PublicKey), Error> {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, UnsealCommand::name());
         let unseal_command = UnsealCommand::new(slot, epubkey, xcvc);
         let unseal_response: UnsealResponse = transmit(self.transport(), &unseal_command).await?;
@@ -159,7 +159,7 @@ impl SatsCard {
 
         // private key for spending (for addr), 32 bytes
         // the private key is encrypted, XORed with the session key, need to decrypt
-        let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+        let session_key = secp256k1::ecdh::SharedSecret::new(&self.pubkey().inner, &eprivkey);
         // decrypt the private key by XORing with the session key
         let privkey: Vec<u8> = session_key
             .as_ref()
@@ -167,8 +167,8 @@ impl SatsCard {
             .zip(&unseal_response.privkey)
             .map(|(session_key_byte, privkey_byte)| session_key_byte ^ privkey_byte)
             .collect();
-        let privkey = SecretKey::from_slice(&privkey)?;
-        let pubkey = PublicKey::from_slice(&unseal_response.pubkey)?;
+        let privkey = PrivateKey::from_slice(&privkey, Network::Bitcoin)?;
+        let pubkey = PublicKey::from_slice(&unseal_response.pubkey).map_err(Error::from)?;
         // TODO should verify user provided chain code was used similar to above `derive`.
         Ok((privkey, pubkey))
     }
@@ -182,7 +182,7 @@ impl SatsCard {
         &mut self,
         slot: u8,
         cvc: Option<String>,
-    ) -> Result<(Option<SecretKey>, PublicKey), Error> {
+    ) -> Result<(Option<PrivateKey>, PublicKey), Error> {
         let epubkey_eprivkey_xcvc = cvc.map(|cvc| {
             let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DumpCommand::name());
             (epubkey, eprivkey, xcvc)
@@ -213,12 +213,13 @@ impl SatsCard {
 
         // at this point pubkey must be available
         let pubkey_bytes = dump_response.pubkey.unwrap();
-        let pubkey = PublicKey::from_slice(&pubkey_bytes)?;
+        let pubkey = PublicKey::from_slice(&pubkey_bytes).map_err(Error::from)?;
+
         // TODO use chaincode and master public key to verify pubkey or return error
 
         let seckey = if let (Some(privkey), Some(eprivkey)) = (dump_response.privkey, eprivkey) {
             // the private key is encrypted, XORed with the session key, need to decrypt
-            let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+            let session_key = secp256k1::ecdh::SharedSecret::new(&self.pubkey().inner, &eprivkey);
             // decrypt the private key by XORing with the session key
             let privkey: Vec<u8> = session_key
                 .as_ref()
@@ -226,7 +227,7 @@ impl SatsCard {
                 .zip(&privkey)
                 .map(|(session_key_byte, privkey_byte)| session_key_byte ^ privkey_byte)
                 .collect();
-            let privkey = SecretKey::from_slice(&privkey)?;
+            let privkey = PrivateKey::from_slice(&privkey, Network::Bitcoin)?;
             Some(privkey)
         } else {
             None
@@ -238,8 +239,8 @@ impl SatsCard {
     pub async fn address(&mut self) -> Result<String, Error> {
         let network = Network::Bitcoin;
         let slot_pubkey = self.read(None).await?;
-        let pk = BitcoinPublicKey::from_slice(&slot_pubkey.serialize())?;
-        let address = Address::p2wpkh(&pk, network);
+        let slot_pubkey = bitcoin::CompressedPublicKey(slot_pubkey.inner);
+        let address = Address::p2wpkh(&slot_pubkey, network);
         Ok(address.to_string())
     }
 
@@ -253,7 +254,7 @@ impl SatsCard {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, SignCommand::name());
 
         // Use the same session key to encrypt the new CVC
-        let session_key = secp256k1::ecdh::SharedSecret::new(self.pubkey(), &eprivkey);
+        let session_key = secp256k1::ecdh::SharedSecret::new(&self.pubkey().inner, &eprivkey);
 
         // encrypt the digest by XORing with the session key
         let xdigest_vec: Vec<u8> = session_key
@@ -408,7 +409,7 @@ pub struct SlotDetails {
     /// Slot number.
     pub slot: usize,
     /// Private key for spending (for addr) or None if slot not unsealed or no CVC given.
-    pub privkey: Option<SecretKey>,
+    pub privkey: Option<PrivateKey>,
     /// Public key for receiving bitcoin.
     pub pubkey: PublicKey,
     /// Full payment address (not censored).
@@ -426,11 +427,9 @@ mod test {
     use bdk_wallet::template::P2Wpkh;
     use bdk_wallet::test_utils::{insert_anchor, insert_checkpoint, insert_tx, new_tx};
     use bdk_wallet::{KeychainKind, SignOptions, Wallet};
-    use bitcoin::Network::{Bitcoin, Testnet};
+    use bitcoin::Network::Testnet;
     use bitcoin::hashes::Hash;
-    use bitcoin::{
-        Address, Amount, BlockHash, FeeRate, Network, PrivateKey, PublicKey, Transaction, TxOut,
-    };
+    use bitcoin::{Address, Amount, BlockHash, FeeRate, Network, Transaction, TxOut};
     use std::path::Path;
     use std::str::FromStr;
 
@@ -445,11 +444,8 @@ mod test {
         if let CkTapCard::SatsCard(mut sc) = emulator {
             let slot_pubkey = sc.slot_pubkey().await.unwrap().unwrap();
             let card_address = sc.address().await.unwrap();
-            let (seckey, pubkey) = sc.unseal(0, "123456").await.unwrap();
+            let (_seckey, pubkey) = sc.unseal(0, "123456").await.unwrap();
             assert_eq!(pubkey, slot_pubkey);
-
-            let _seckey = PrivateKey::new(seckey, Bitcoin);
-            let pubkey = PublicKey::new(pubkey);
 
             let descriptor = P2Wpkh(pubkey);
             let mut wallet = Wallet::create_single(descriptor)

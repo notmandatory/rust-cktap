@@ -1,31 +1,28 @@
 extern crate core;
 
-use bitcoin::key::rand::Rng as _;
-pub use bitcoin::*;
+pub use bitcoin::psbt::Psbt;
+pub use bitcoin::secp256k1::rand;
+pub use bitcoin_hashes::sha256::Hash;
 
 pub use commands::CkTransport;
+pub use error::CkTapError;
+pub use error::Error;
 
-pub mod apdu;
+use bitcoin::key::rand::Rng as _;
+
+pub(crate) mod apdu;
 pub mod commands;
-pub mod factory_root_key;
-
-pub use bitcoin::{
-    Address, Network,
-    key::CompressedPublicKey,
-    key::UntweakedPublicKey,
-    secp256k1::{self, rand},
-};
-pub use bitcoin_hashes;
+pub mod error;
+pub(crate) mod factory_root_key;
+pub mod sats_card;
+pub mod sats_chip;
+pub mod tap_signer;
 
 #[cfg(feature = "emulator")]
 pub mod emulator;
 
 #[cfg(feature = "pcsc")]
 pub mod pcsc;
-
-pub mod sats_card;
-pub mod sats_chip;
-pub mod tap_signer;
 
 pub type SatsCard = sats_card::SatsCard;
 pub type TapSigner = tap_signer::TapSigner;
@@ -39,9 +36,6 @@ pub enum CkTapCard {
     TapSigner(TapSigner),
     SatsChip(SatsChip),
 }
-
-// re-export
-pub use apdu::Error;
 
 impl core::fmt::Debug for CkTapCard {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

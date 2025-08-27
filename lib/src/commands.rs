@@ -1,11 +1,12 @@
 use crate::factory_root_key::FactoryRootKey;
-use crate::{CkTapCard, SatsCard, TapSigner};
+use crate::{CkTapCard, CkTapError, Error, SatsCard, TapSigner};
 use crate::{apdu::*, rand_nonce};
 
-use bitcoin::key::rand;
+use bitcoin::key::{PublicKey, rand};
+use bitcoin::secp256k1;
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
-use bitcoin::secp256k1::{All, Message, PublicKey, Secp256k1, SecretKey};
+use bitcoin::secp256k1::{All, Message, Secp256k1};
 use bitcoin_hashes::sha256;
 
 use std::convert::TryFrom;
@@ -28,7 +29,11 @@ pub trait Authentication {
 
     /// Calculate ephemeral key pair and XOR'd CVC.
     /// ref: ["Authenticating Commands with CVC"](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#authenticating-commands-with-cvc)
-    fn calc_ekeys_xcvc(&self, cvc: &str, command: &str) -> (SecretKey, PublicKey, Vec<u8>) {
+    fn calc_ekeys_xcvc(
+        &self,
+        cvc: &str,
+        command: &str,
+    ) -> (secp256k1::SecretKey, secp256k1::PublicKey, Vec<u8>) {
         let secp = Self::secp(self);
         let pubkey = Self::pubkey(self);
         let nonce = Self::card_nonce(self);
@@ -37,7 +42,7 @@ pub trait Authentication {
         let (ephemeral_private_key, ephemeral_public_key) =
             secp.generate_keypair(&mut rand::thread_rng());
 
-        let session_key = SharedSecret::new(pubkey, &ephemeral_private_key);
+        let session_key = SharedSecret::new(&pubkey.inner, &ephemeral_private_key);
         let md = sha256::Hash::hash(card_nonce_command.as_slice());
         let md: &[u8; 32] = md.as_ref();
 
@@ -127,7 +132,7 @@ pub trait Read: Authentication {
             let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, ReadCommand::name());
             (
                 ReadCommand::authenticated(app_nonce, epubkey, xcvc),
-                Some(SharedSecret::new(self.pubkey(), &eprivkey)),
+                Some(SharedSecret::new(&self.pubkey().inner, &eprivkey)),
             )
         } else {
             (ReadCommand::unauthenticated(app_nonce), None)
@@ -141,7 +146,7 @@ pub trait Read: Authentication {
         self.secp().verify_ecdsa(
             &message_digest,
             &read_response.signature()?, // or add 'from' trait: Signature::from(response.sig: )
-            &pubkey,
+            &pubkey.inner,
         )?;
 
         // update the card nonce
@@ -160,7 +165,7 @@ pub trait Wait: Authentication {
         });
 
         let (epubkey, xcvc) = epubkey_xcvc
-            .map(|(epubkey, xcvc)| (Some(epubkey.serialize()), Some(xcvc)))
+            .map(|(epubkey, xcvc)| (Some(epubkey), Some(xcvc)))
             .unwrap_or((None, None));
 
         let wait_command = WaitCommand::new(epubkey, xcvc);
@@ -200,7 +205,7 @@ pub trait Certificate: Read {
         message_bytes.extend(app_nonce);
         if let Some(pubkey) = slot_pubkey {
             if self.ver() != "0.9.0" {
-                let slot_pubkey_bytes = pubkey.serialize();
+                let slot_pubkey_bytes = pubkey.inner.serialize();
                 message_bytes.extend(slot_pubkey_bytes);
             }
         }
@@ -211,7 +216,7 @@ pub trait Certificate: Read {
         let signature = Signature::from_compact(check_response.auth_sig.as_slice())
             .expect("Failed to construct ECDSA signature from check response");
         self.secp()
-            .verify_ecdsa(&message, &signature, self.pubkey())?;
+            .verify_ecdsa(&message, &signature, &self.pubkey().inner)?;
 
         let mut pubkey = *self.pubkey();
         for sig in &certs_response.cert_chain() {
@@ -227,13 +232,13 @@ pub trait Certificate: Read {
             let (_, sig) = sig.split_at(1);
             let result = RecoverableSignature::from_compact(sig, rec_id);
             let rec_sig = result?;
-            let pubkey_hash = sha256::Hash::hash(&pubkey.serialize());
+            let pubkey_hash = sha256::Hash::hash(&pubkey.inner.serialize());
             let md = Message::from_digest(pubkey_hash.to_byte_array());
             let result = self.secp().recover_ecdsa(&md, &rec_sig);
-            pubkey = result?;
+            pubkey = PublicKey::new(result?);
         }
 
-        FactoryRootKey::try_from(pubkey)
+        FactoryRootKey::try_from(pubkey.inner)
     }
 
     async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error>;

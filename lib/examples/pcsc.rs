@@ -1,6 +1,6 @@
 extern crate core;
 
-use rust_cktap::apdu::Error;
+use rust_cktap::Error;
 use rust_cktap::commands::{Certificate, Wait};
 use rust_cktap::{CkTapCard, pcsc, rand_chaincode};
 

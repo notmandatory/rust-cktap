@@ -1,8 +1,7 @@
+use super::{CommandApdu, ResponseApdu};
 use core::fmt::{self, Formatter};
 
-use super::{CommandApdu, ResponseApdu};
-
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1;
 use bitcoin_hashes::hex::DisplayHex as _;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +25,8 @@ impl CommandApdu for XpubCommand {
 }
 
 impl XpubCommand {
-    pub fn new(master: bool, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    #[allow(unused)] // TODO this needs to be used
+    pub fn new(master: bool, epubkey: secp256k1::PublicKey, xcvc: Vec<u8>) -> Self {
         Self {
             cmd: Self::name(),
             master,
@@ -39,9 +39,9 @@ impl XpubCommand {
 #[derive(Deserialize, Clone)]
 pub struct XpubResponse {
     #[serde(with = "serde_bytes")]
-    pub xpub: Vec<u8>,
+    xpub: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    pub card_nonce: [u8; 16],
+    card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for XpubResponse {}
@@ -82,7 +82,7 @@ impl CommandApdu for ChangeCommand {
 }
 
 impl ChangeCommand {
-    pub fn new(data: Vec<u8>, epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn new(data: Vec<u8>, epubkey: secp256k1::PublicKey, xcvc: Vec<u8>) -> Self {
         Self {
             cmd: Self::name(),
             data,
@@ -125,7 +125,7 @@ impl CommandApdu for BackupCommand {
 }
 
 impl BackupCommand {
-    pub fn new(epubkey: PublicKey, xcvc: Vec<u8>) -> Self {
+    pub fn new(epubkey: secp256k1::PublicKey, xcvc: Vec<u8>) -> Self {
         Self {
             cmd: Self::name(),
             epubkey: epubkey.serialize(),
