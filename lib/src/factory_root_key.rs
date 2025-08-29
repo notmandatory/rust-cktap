@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::error::CertsError;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin_hashes::hex::DisplayHex;
 use std::convert::TryFrom;
@@ -18,13 +18,13 @@ pub enum FactoryRootKey {
 }
 
 impl TryFrom<PublicKey> for FactoryRootKey {
-    type Error = Error;
+    type Error = CertsError;
 
-    fn try_from(pubkey: PublicKey) -> Result<Self, Error> {
+    fn try_from(pubkey: PublicKey) -> Result<Self, CertsError> {
         match pubkey.serialize().to_lower_hex_string().as_str() {
             PUB_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Pub(pubkey)),
             DEV_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Dev(pubkey)),
-            _ => Err(Error::InvalidRootCert(
+            _ => Err(CertsError::InvalidRootCert(
                 pubkey.serialize().to_lower_hex_string(),
             )),
         }

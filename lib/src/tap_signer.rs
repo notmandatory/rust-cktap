@@ -4,13 +4,14 @@ use crate::apdu::{
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
-use crate::{BIP32_HARDENED_MASK, Error};
+use crate::error::{ChangeError, DeriveError, ReadError, SignPsbtError, StatusError};
+use crate::{BIP32_HARDENED_MASK, CkTapError};
 use async_trait::async_trait;
 use bitcoin::PublicKey;
+use bitcoin::bip32::ChainCode;
 use bitcoin::hex::DisplayHex;
 use bitcoin::secp256k1::{self, All, Message, Secp256k1, ecdsa::Signature};
 use bitcoin_hashes::sha256;
-use log::error;
 use std::sync::Arc;
 
 const BIP84_PATH_LEN: usize = 5;
@@ -32,60 +33,6 @@ pub struct TapSigner {
     pub pubkey: PublicKey,
     pub card_nonce: [u8; 16],
     pub auth_delay: Option<usize>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum TapSignerError {
-    #[error(transparent)]
-    ApduError(#[from] Error),
-
-    #[error(transparent)]
-    CvcChangeError(#[from] CvcChangeError),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum CvcChangeError {
-    #[error("new cvc is too short, must be at least 6 bytes, was only {0} bytes")]
-    TooShort(usize),
-
-    #[error("new cvc is too long, must be at most 32 bytes, was {0} bytes")]
-    TooLong(usize),
-
-    #[error("new cvc is the same as the old one")]
-    SameAsOld,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum PsbtSignError {
-    #[error("Missing UTXO")]
-    MissingUtxo(usize),
-
-    #[error("Missing pubkey")]
-    MissingPubkey(usize),
-
-    #[error("Signature error: {0}")]
-    SignatureError(String),
-
-    #[error("Witness program error: {0}")]
-    WitnessProgramError(String),
-
-    #[error("Sighash error: {0}")]
-    SighashError(String),
-
-    #[error("Invalid script: index: {0}")]
-    InvalidScript(usize),
-
-    #[error(transparent)]
-    TapSignerError(#[from] Error),
-
-    #[error("Pubkey mismatch: index: {0}")]
-    PubkeyMismatch(usize),
-
-    #[error("Invalid path at index: {0}")]
-    InvalidPath(usize),
-
-    #[error("Signing slot is not unsealed: {0}")]
-    SlotNotUnsealed(u8),
 }
 
 impl Authentication for TapSigner {
@@ -126,7 +73,7 @@ impl Authentication for TapSigner {
 #[async_trait]
 pub trait TapSignerShared: Authentication {
     /// Initialize the tap signer or sats chip, can only be done once
-    async fn init(&mut self, chain_code: [u8; 32], cvc: &str) -> Result<(), TapSignerError> {
+    async fn init(&mut self, chain_code: ChainCode, cvc: &str) -> Result<(), CkTapError> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, NewCommand::name());
         let new_command = NewCommand::new(Some(0), Some(chain_code), epubkey, xcvc);
         let new_response: NewResponse = transmit(self.transport(), &new_command).await?;
@@ -135,7 +82,7 @@ pub trait TapSignerShared: Authentication {
     }
 
     /// Get the status of the tap signer or sats chip, including the current card nonce
-    async fn status(&mut self) -> Result<StatusResponse, Error> {
+    async fn status(&mut self) -> Result<StatusResponse, CkTapError> {
         let cmd = StatusCommand::default();
         let status_response: StatusResponse = transmit(self.transport(), &cmd).await?;
         self.set_card_nonce(status_response.card_nonce);
@@ -148,7 +95,7 @@ pub trait TapSignerShared: Authentication {
         digest: [u8; 32],
         sub_path: Vec<u32>,
         cvc: &str,
-    ) -> Result<SignResponse, Error> {
+    ) -> Result<SignResponse, CkTapError> {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, SignCommand::name());
 
         // Use the same session key to encrypt the new CVC
@@ -167,11 +114,11 @@ pub trait TapSignerShared: Authentication {
         let sign_command =
             SignCommand::for_tapsigner(sub_path.clone(), xdigest, epubkey, xcvc.clone());
 
-        let mut sign_response: Result<SignResponse, Error> =
+        let mut sign_response: Result<SignResponse, CkTapError> =
             transmit(self.transport(), &sign_command).await;
 
         let mut unlucky_number_retries = 0;
-        while let Err(Error::CkTap(crate::CkTapError::UnluckyNumber)) = sign_response {
+        while let Err(CkTapError::Card(crate::CardError::UnluckyNumber)) = sign_response {
             let sign_command =
                 SignCommand::for_tapsigner(sub_path.clone(), xdigest, epubkey, xcvc.clone());
 
@@ -195,13 +142,11 @@ pub trait TapSignerShared: Authentication {
         &mut self,
         mut psbt: bitcoin::Psbt,
         cvc: &str,
-    ) -> Result<bitcoin::Psbt, PsbtSignError> {
+    ) -> Result<bitcoin::Psbt, SignPsbtError> {
         use bitcoin::{
             secp256k1::ecdsa,
             sighash::{EcdsaSighashType, SighashCache},
         };
-
-        type Error = PsbtSignError;
 
         let unsigned_tx = psbt.unsigned_tx.clone();
         let mut sighash_cache = SighashCache::new(&unsigned_tx);
@@ -211,14 +156,14 @@ pub trait TapSignerShared: Authentication {
             let witness_utxo = input
                 .witness_utxo
                 .as_ref()
-                .ok_or(Error::MissingUtxo(input_index))?;
+                .ok_or(SignPsbtError::MissingUtxo(input_index))?;
 
             let amount = witness_utxo.value;
 
             // extract the P2WPKH script from PSBT
             let script_pubkey = &witness_utxo.script_pubkey;
             if !script_pubkey.is_p2wpkh() {
-                return Err(Error::InvalidScript(input_index));
+                return Err(SignPsbtError::InvalidScript(input_index));
             }
 
             // get the public key from the PSBT
@@ -226,24 +171,24 @@ pub trait TapSignerShared: Authentication {
             let (psbt_pubkey, (_fingerprint, path)) = key_pairs
                 .iter()
                 .next()
-                .ok_or(Error::MissingPubkey(input_index))?;
+                .ok_or(SignPsbtError::MissingPubkey(input_index))?;
 
             let path = path.to_u32_vec();
 
             if path.len() != BIP84_PATH_LEN {
-                return Err(Error::InvalidPath(input_index));
+                return Err(SignPsbtError::InvalidPath(input_index));
             }
 
             let sub_path = BIP84_HARDENED_SUBPATH.map(|i| path[i]);
             if sub_path.iter().any(|p| *p > BIP32_HARDENED_MASK) {
-                return Err(Error::InvalidPath(input_index));
+                return Err(SignPsbtError::InvalidPath(input_index));
             }
 
             // calculate sighash
             let script = script_pubkey.as_script();
             let sighash = sighash_cache
                 .p2wpkh_signature_hash(input_index, script, amount, EcdsaSighashType::All)
-                .map_err(|e| Error::SighashError(e.to_string()))?;
+                .map_err(|e| SignPsbtError::SighashError(e.to_string()))?;
 
             // the digest is the sighash
             let digest: &[u8; 32] = sighash.as_ref();
@@ -263,7 +208,7 @@ pub trait TapSignerShared: Authentication {
                     .collect();
                 let derive_response = self.derive(path, cvc).await;
                 if derive_response.is_err() {
-                    return Err(Error::PubkeyMismatch(input_index));
+                    return Err(SignPsbtError::PubkeyMismatch(input_index));
                 }
 
                 // update signature to the new one we just derived
@@ -272,13 +217,13 @@ pub trait TapSignerShared: Authentication {
 
                 // if still not matching, return error
                 if sign_response.pubkey != psbt_pubkey.serialize() {
-                    return Err(Error::PubkeyMismatch(input_index));
+                    return Err(SignPsbtError::PubkeyMismatch(input_index));
                 }
             }
 
             // update the PSBT input with the signature
             let ecdsa_sig = ecdsa::Signature::from_compact(&signature_raw)
-                .map_err(|e| Error::SignatureError(e.to_string()))?;
+                .map_err(|e| SignPsbtError::SignatureError(e.to_string()))?;
 
             let final_sig = bitcoin::ecdsa::Signature::sighash_all(ecdsa_sig);
             input.partial_sigs.insert((*psbt_pubkey).into(), final_sig);
@@ -295,7 +240,7 @@ pub trait TapSignerShared: Authentication {
     /// mobile wallet.
     ///
     /// Ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#tapsigner-performs-subkey-derivation
-    async fn derive(&mut self, path: Vec<u32>, cvc: &str) -> Result<PublicKey, TapSignerError> {
+    async fn derive(&mut self, path: Vec<u32>, cvc: &str) -> Result<PublicKey, DeriveError> {
         // set most significant bit to 1 to represent hardened path steps
         let path = path.iter().map(|p| p ^ (1 << 31)).collect::<Vec<_>>();
         let app_nonce = crate::rand_nonce();
@@ -304,10 +249,9 @@ pub trait TapSignerShared: Authentication {
         let derive_response: DeriveResponse = transmit(self.transport(), &cmd).await?;
         self.set_card_nonce(derive_response.card_nonce);
 
-        let master_pubkey =
-            PublicKey::from_slice(&derive_response.master_pubkey).map_err(Error::from)?;
+        let master_pubkey = PublicKey::from_slice(&derive_response.master_pubkey)?;
         let pubkey = match &derive_response.pubkey {
-            Some(pubkey) => PublicKey::from_slice(pubkey).map_err(Error::from)?,
+            Some(pubkey) => PublicKey::from_slice(pubkey)?,
             None => master_pubkey,
         };
 
@@ -325,27 +269,26 @@ pub trait TapSignerShared: Authentication {
             let message_bytes_hash = sha256::Hash::hash(message_bytes.as_slice());
             let message = Message::from_digest(message_bytes_hash.to_byte_array());
 
-            let signature = Signature::from_compact(sig).map_err(Error::from)?;
+            let signature = Signature::from_compact(sig)?;
 
             self.secp()
-                .verify_ecdsa(&message, &signature, &master_pubkey.inner)
-                .map_err(Error::from)?;
+                .verify_ecdsa(&message, &signature, &master_pubkey.inner)?;
         }
         Ok(pubkey)
     }
 
     /// Change the CVC used for card authentication to a new user provided one
-    async fn change(&mut self, new_cvc: &str, cvc: &str) -> Result<(), TapSignerError> {
+    async fn change(&mut self, new_cvc: &str, cvc: &str) -> Result<(), ChangeError> {
         if new_cvc.len() < 6 {
-            return Err(CvcChangeError::TooShort(new_cvc.len()).into());
+            return Err(ChangeError::TooShort(new_cvc.len()));
         }
 
         if new_cvc.len() > 32 {
-            return Err(CvcChangeError::TooLong(new_cvc.len()).into());
+            return Err(ChangeError::TooLong(new_cvc.len()));
         }
 
         if new_cvc == cvc {
-            return Err(CvcChangeError::SameAsOld.into());
+            return Err(ChangeError::SameAsOld);
         }
 
         // Create session key and encrypt current CVC
@@ -376,9 +319,9 @@ impl TapSigner {
     pub fn try_from_status(
         transport: Arc<dyn CkTransport>,
         status_response: StatusResponse,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StatusError> {
         let pubkey = status_response.pubkey.as_slice();
-        let pubkey = PublicKey::from_slice(pubkey).map_err(Error::from)?;
+        let pubkey = PublicKey::from_slice(pubkey)?;
 
         Ok(TapSigner {
             transport,
@@ -395,7 +338,7 @@ impl TapSigner {
     }
 
     /// Backup the current card, the backup is encrypted with the "Backup Password" on the back of the card
-    pub async fn backup(&mut self, cvc: &str) -> Result<Vec<u8>, TapSignerError> {
+    pub async fn backup(&mut self, cvc: &str) -> Result<Vec<u8>, ChangeError> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, "backup");
 
         let backup_command = BackupCommand::new(epubkey, xcvc);
@@ -422,7 +365,7 @@ impl Read for TapSigner {
 
 #[async_trait]
 impl Certificate for TapSigner {
-    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, ReadError> {
         Ok(None)
     }
 }

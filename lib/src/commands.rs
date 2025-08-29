@@ -1,5 +1,5 @@
 use crate::factory_root_key::FactoryRootKey;
-use crate::{CkTapCard, CkTapError, Error, SatsCard, TapSigner};
+use crate::{CardError, CkTapCard, CkTapError, SatsCard, TapSigner};
 use crate::{apdu::*, rand_nonce};
 
 use bitcoin::key::{PublicKey, rand};
@@ -11,6 +11,7 @@ use bitcoin_hashes::sha256;
 
 use std::convert::TryFrom;
 
+use crate::error::{CertsError, ReadError, StatusError};
 use crate::sats_chip::SatsChip;
 use async_trait::async_trait;
 use std::fmt::Debug;
@@ -62,11 +63,14 @@ pub trait Authentication {
 /// Trait for exchanging APDU data with cktap cards.
 #[async_trait]
 pub trait CkTransport: Sync + Send {
-    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, Error>;
+    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, CkTapError>;
 }
 
 /// Helper function for serialize APDU commands, transmit them and deserialize responses.
-pub(crate) async fn transmit<C, R>(transport: Arc<dyn CkTransport>, command: &C) -> Result<R, Error>
+pub(crate) async fn transmit<C, R>(
+    transport: Arc<dyn CkTransport>,
+    command: &C,
+) -> Result<R, CkTapError>
 where
     C: CommandApdu + serde::Serialize + Debug + Send + Sync,
     R: ResponseApdu + serde::de::DeserializeOwned + Debug + Send,
@@ -77,7 +81,7 @@ where
     Ok(response)
 }
 
-pub async fn to_cktap(transport: Arc<dyn CkTransport>) -> Result<CkTapCard, Error> {
+pub async fn to_cktap(transport: Arc<dyn CkTransport>) -> Result<CkTapCard, StatusError> {
     // Get status from card
     let cmd = AppletSelect::default();
     let status_response: StatusResponse = transmit(transport.clone(), &cmd).await?;
@@ -96,7 +100,7 @@ pub async fn to_cktap(transport: Arc<dyn CkTransport>) -> Result<CkTapCard, Erro
             let sats_card = SatsCard::from_status(transport, status_response)?;
             Ok(CkTapCard::SatsCard(sats_card))
         }
-        (_, _) => Err(Error::UnknownCardType("Card not recognized.".to_string())),
+        (_, _) => Err(StatusError::CkTap(CkTapError::UnknownCardType)),
     }
 }
 
@@ -109,7 +113,7 @@ pub trait Read: Authentication {
 
     fn slot(&self) -> Option<u8>;
 
-    async fn read(&mut self, cvc: Option<String>) -> Result<PublicKey, Error> {
+    async fn read(&mut self, cvc: Option<String>) -> Result<PublicKey, ReadError> {
         let card_nonce = *self.card_nonce();
         let app_nonce = rand_nonce();
 
@@ -128,7 +132,7 @@ pub trait Read: Authentication {
 
         // create the read command
         let (cmd, session_key) = if self.requires_auth() {
-            let cvc = cvc.ok_or(Error::CkTap(CkTapError::NeedsAuth))?;
+            let cvc = cvc.ok_or(CkTapError::Card(CardError::NeedsAuth))?;
             let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, ReadCommand::name());
             (
                 ReadCommand::authenticated(app_nonce, epubkey, xcvc),
@@ -158,7 +162,7 @@ pub trait Read: Authentication {
 
 #[async_trait]
 pub trait Wait: Authentication {
-    async fn wait(&mut self, cvc: Option<String>) -> Result<Option<usize>, Error> {
+    async fn wait(&mut self, cvc: Option<String>) -> Result<Option<usize>, CkTapError> {
         let epubkey_xcvc = cvc.map(|cvc| {
             let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, WaitCommand::name());
             (epubkey, xcvc)
@@ -185,7 +189,7 @@ pub trait Wait: Authentication {
 
 #[async_trait]
 pub trait Certificate: Read {
-    async fn check_certificate(&mut self) -> Result<FactoryRootKey, Error> {
+    async fn check_certificate(&mut self) -> Result<FactoryRootKey, CertsError> {
         let app_nonce = rand_nonce();
         let card_nonce = *self.card_nonce();
 
@@ -241,7 +245,7 @@ pub trait Certificate: Read {
         FactoryRootKey::try_from(pubkey.inner)
     }
 
-    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error>;
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, ReadError>;
 }
 
 #[cfg(feature = "emulator")]
@@ -258,8 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_command() {
-        let rng = &mut rand::thread_rng();
-        let chain_code = rand_chaincode(rng);
+        let chain_code = rand_chaincode();
         for card_type in CardTypeOption::values() {
             let pipe_path = format!("/tmp/test-new-command-pipe{card_type}");
             let pipe_path = Path::new(&pipe_path);
@@ -311,19 +314,19 @@ mod tests {
                     assert_eq!(card_type, CardTypeOption::SatsCard);
                     let response = sc.check_certificate().await;
                     assert!(response.is_err());
-                    matches!(response, Err(Error::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
+                    matches!(response, Err(CertsError::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
                 }
                 CkTapCard::TapSigner(mut ts) => {
                     assert_eq!(card_type, CardTypeOption::TapSigner);
                     let response = ts.check_certificate().await;
                     assert!(response.is_err());
-                    matches!(response, Err(Error::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
+                    matches!(response, Err(CertsError::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
                 }
                 CkTapCard::SatsChip(mut sc) => {
                     assert_eq!(card_type, CardTypeOption::SatsChip);
                     let response = sc.check_certificate().await;
                     assert!(response.is_err());
-                    matches!(response, Err(Error::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
+                    matches!(response, Err(CertsError::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
                 }
             };
             drop(python);

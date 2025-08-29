@@ -3,9 +3,9 @@ use bitcoin::PublicKey;
 use bitcoin::secp256k1::{All, Secp256k1};
 use std::sync::Arc;
 
-use crate::Error;
 use crate::apdu::StatusResponse;
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
+use crate::error::{ReadError, StatusError};
 use crate::tap_signer::TapSignerShared;
 
 /// - SATSCHIP model: this product variant is a TAPSIGNER in all respects,
@@ -67,9 +67,9 @@ impl SatsChip {
     pub fn try_from_status(
         transport: Arc<dyn CkTransport>,
         status_response: StatusResponse,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StatusError> {
         let pubkey = status_response.pubkey.as_slice();
-        let pubkey = PublicKey::from_slice(pubkey).map_err(Error::from)?;
+        let pubkey = PublicKey::from_slice(pubkey).map_err(StatusError::from)?;
 
         Ok(SatsChip {
             transport,
@@ -102,7 +102,7 @@ impl Read for SatsChip {
 
 #[async_trait]
 impl Certificate for SatsChip {
-    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, ReadError> {
         Ok(None)
     }
 }

@@ -1,23 +1,23 @@
+mod error;
+mod sats_card;
+mod sats_chip;
+mod tap_signer;
+
 uniffi::setup_scaffolding!();
 
+use crate::error::{
+    CertsError, ChainCodeError, CkTapError, KeyError, PsbtError, ReadError, StatusError,
+};
+use crate::sats_card::SatsCard;
+use crate::sats_chip::SatsChip;
+use crate::tap_signer::TapSigner;
 use futures::lock::Mutex;
-use rust_cktap::commands::{Authentication, Read};
+use rust_cktap::Network;
+use rust_cktap::commands::{Certificate, Read};
+use rust_cktap::factory_root_key::FactoryRootKey;
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::sync::Arc;
-
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum CkTapError {
-    #[error("Core Error: {msg}")]
-    Core { msg: String },
-    #[error("Transport Error: {msg}")]
-    Transport { msg: String },
-}
-
-impl From<rust_cktap::Error> for CkTapError {
-    fn from(e: rust_cktap::Error) -> Self {
-        CkTapError::Core { msg: e.to_string() }
-    }
-}
 
 #[uniffi::export(callback_interface)]
 #[async_trait::async_trait]
@@ -29,86 +29,94 @@ pub struct CkTransportWrapper(Box<dyn CkTransport>);
 
 #[async_trait::async_trait]
 impl rust_cktap::CkTransport for CkTransportWrapper {
-    async fn transmit_apdu(&self, command_apdu: Vec<u8>) -> Result<Vec<u8>, rust_cktap::Error> {
+    async fn transmit_apdu(
+        &self,
+        command_apdu: Vec<u8>,
+    ) -> Result<Vec<u8>, rust_cktap::CkTapError> {
         self.0
             .transmit_apdu(command_apdu)
             .await
-            .map_err(|e| rust_cktap::Error::Transport(e.to_string()))
+            .map_err(|e| rust_cktap::CkTapError::Transport(e.to_string()))
     }
 }
 
-// TODO de-duplicate code between SatsCard, TapSigner and SatsChip
-
-#[derive(uniffi::Object)]
-pub struct SatsCard(Mutex<rust_cktap::SatsCard>);
-
-#[uniffi::export]
-impl SatsCard {
-    pub async fn ver(&self) -> String {
-        self.0.lock().await.ver().to_string()
-    }
-
-    pub async fn address(&self) -> Result<String, CkTapError> {
-        self.0
-            .lock()
-            .await
-            .address()
-            .await
-            .map_err(|e| CkTapError::Core { msg: e.to_string() })
-    }
-
-    pub async fn read(&self) -> Result<Vec<u8>, CkTapError> {
-        self.0
-            .lock()
-            .await
-            .read(None)
-            .await
-            .map(|pk| pk.to_bytes().to_vec())
-            .map_err(|e| CkTapError::Core { msg: e.to_string() })
-    }
-    // TODO implement the rest of the commands
+#[derive(uniffi::Object, Clone, Eq, PartialEq)]
+pub struct PrivateKey {
+    inner: rust_cktap::PrivateKey,
 }
 
-#[derive(uniffi::Object)]
-pub struct TapSigner(Mutex<rust_cktap::TapSigner>);
-
 #[uniffi::export]
-impl TapSigner {
-    pub async fn ver(&self) -> String {
-        self.0.lock().await.ver().to_string()
+impl PrivateKey {
+    #[uniffi::constructor]
+    pub fn from(data: Vec<u8>) -> Result<Self, KeyError> {
+        Ok(Self {
+            inner: rust_cktap::PrivateKey::from_slice(data.as_slice(), Network::Bitcoin)
+                .map_err(|e| KeyError::Secp256k1 { msg: e.to_string() })?,
+        })
     }
 
-    pub async fn read(&self, cvc: String) -> Result<Vec<u8>, CkTapError> {
-        self.0
-            .lock()
-            .await
-            .read(Some(cvc))
-            .await
-            .map(|pk| pk.to_bytes().to_vec())
-            .map_err(|e| CkTapError::Core { msg: e.to_string() })
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes()
     }
-    // TODO implement the rest of the commands
 }
 
-#[derive(uniffi::Object)]
-pub struct SatsChip(Mutex<rust_cktap::SatsChip>);
+#[derive(uniffi::Object, Clone, Eq, PartialEq)]
+pub struct PublicKey {
+    inner: rust_cktap::PublicKey,
+}
 
 #[uniffi::export]
-impl SatsChip {
-    pub async fn ver(&self) -> String {
-        self.0.lock().await.ver().to_string()
+impl PublicKey {
+    #[uniffi::constructor]
+    pub fn from(data: Vec<u8>) -> Result<Self, KeyError> {
+        Ok(Self {
+            inner: rust_cktap::PublicKey::from_slice(data.as_slice())
+                .map_err(|e| KeyError::Secp256k1 { msg: e.to_string() })?,
+        })
     }
 
-    pub async fn read(&self) -> Result<Vec<u8>, CkTapError> {
-        self.0
-            .lock()
-            .await
-            .read(None)
-            .await
-            .map(|pk| pk.to_bytes().to_vec())
-            .map_err(|e| CkTapError::Core { msg: e.to_string() })
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes()
     }
-    // TODO implement the rest of the commands
+}
+
+#[derive(uniffi::Object, Clone, Eq, PartialEq)]
+pub struct ChainCode {
+    inner: rust_cktap::ChainCode,
+}
+
+#[uniffi::export]
+impl ChainCode {
+    #[uniffi::constructor]
+    pub fn from_bytes(data: Vec<u8>) -> Result<Self, ChainCodeError> {
+        let data: [u8; 32] = data.try_into()?;
+        Ok(Self {
+            inner: rust_cktap::ChainCode::from(data),
+        })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes().to_vec()
+    }
+}
+
+#[derive(uniffi::Object, Clone, Eq, PartialEq)]
+pub struct Psbt {
+    inner: rust_cktap::Psbt,
+}
+
+#[uniffi::export]
+impl Psbt {
+    #[uniffi::constructor]
+    pub fn from_base64(data: String) -> Result<Self, PsbtError> {
+        Ok(Self {
+            inner: rust_cktap::Psbt::from_str(&data)?,
+        })
+    }
+
+    pub fn to_base64(&self) -> String {
+        self.inner.to_string()
+    }
 }
 
 #[derive(uniffi::Enum)]
@@ -119,11 +127,9 @@ pub enum CkTapCard {
 }
 
 #[uniffi::export]
-pub async fn to_cktap(transport: Box<dyn CkTransport>) -> Result<CkTapCard, CkTapError> {
+pub async fn to_cktap(transport: Box<dyn CkTransport>) -> Result<CkTapCard, StatusError> {
     let wrapper = CkTransportWrapper(transport);
-    let cktap: rust_cktap::CkTapCard = rust_cktap::commands::to_cktap(Arc::new(wrapper))
-        .await
-        .map_err(Into::<CkTapError>::into)?;
+    let cktap: rust_cktap::CkTapCard = rust_cktap::commands::to_cktap(Arc::new(wrapper)).await?;
 
     match cktap {
         rust_cktap::CkTapCard::SatsCard(sc) => {
@@ -138,7 +144,23 @@ pub async fn to_cktap(transport: Box<dyn CkTransport>) -> Result<CkTapCard, CkTa
     }
 }
 
-#[uniffi::export]
-pub fn rand_nonce() -> Vec<u8> {
-    rust_cktap::rand_nonce().to_vec()
+// command helpers
+
+async fn read(
+    card: &mut (impl Read + Send + Sync),
+    cvc: Option<String>,
+) -> Result<Vec<u8>, ReadError> {
+    card.read(cvc)
+        .await
+        .map(|pk| pk.to_bytes())
+        .map_err(ReadError::from)
+}
+
+async fn check_cert(card: &mut (impl Certificate + Send + Sync)) -> Result<(), CertsError> {
+    match card.check_certificate().await? {
+        FactoryRootKey::Pub(_) => Ok(()),
+        FactoryRootKey::Dev(_) => Err(CertsError::InvalidRootCert {
+            msg: "Developer Cert Found".to_string(),
+        }),
+    }
 }

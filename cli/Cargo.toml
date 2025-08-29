@@ -14,6 +14,7 @@ pcsc = { version = "2" }
 clap = { version = "4.3.1", features = ["derive"] }
 rpassword = { version = "7.2" }
 tokio = { version = "1", features = ["full"] }
+thiserror = "2.0.16"
 
 [features]
 emulator = ["rust-cktap/emulator"]

@@ -2,8 +2,9 @@
 /// reader and a smart card. This file defines the Coinkite APDU and set of command/responses.
 pub mod tap_signer;
 
-use crate::error::ErrorResponse;
-use crate::{CkTapError, Error};
+use crate::error::{ErrorResponse, ReadError};
+use crate::{CardError, CkTapError};
+use bitcoin::bip32::ChainCode;
 use bitcoin::secp256k1::{self, ecdh::SharedSecret, ecdsa::Signature};
 use bitcoin::{Network, PrivateKey, PublicKey};
 use bitcoin_hashes::hex::DisplayHex;
@@ -33,7 +34,7 @@ pub trait CommandApdu {
 }
 
 pub trait ResponseApdu {
-    fn from_cbor<'a>(cbor: Vec<u8>) -> Result<Self, Error>
+    fn from_cbor<'a>(cbor: Vec<u8>) -> Result<Self, CkTapError>
     where
         Self: Deserialize<'a> + Debug,
     {
@@ -41,8 +42,8 @@ pub trait ResponseApdu {
         let cbor_struct: Result<ErrorResponse, _> = cbor_value.deserialized();
 
         if let Ok(error_resp) = cbor_struct {
-            let error = CkTapError::error_from_code(error_resp.code).unwrap_or(CkTapError::BadCBOR);
-            return Err(Error::CkTap(error));
+            let error = CardError::error_from_code(error_resp.code).unwrap_or(CardError::BadCBOR);
+            return Err(CkTapError::Card(error));
         }
 
         let cbor_struct: Self = cbor_value.deserialized()?;
@@ -202,18 +203,18 @@ pub struct ReadResponse {
 impl ResponseApdu for ReadResponse {}
 
 impl ReadResponse {
-    pub fn signature(&self) -> Result<Signature, Error> {
-        Signature::from_compact(self.sig.as_slice()).map_err(Error::from)
+    pub fn signature(&self) -> Result<Signature, ReadError> {
+        Signature::from_compact(self.sig.as_slice()).map_err(ReadError::from)
     }
 
-    pub fn pubkey(&self, session_key: Option<SharedSecret>) -> Result<PublicKey, Error> {
+    pub fn pubkey(&self, session_key: Option<SharedSecret>) -> Result<PublicKey, ReadError> {
         if let Some(sk) = session_key {
             let pubkey_bytes = unzip(&self.pubkey, sk);
-            return PublicKey::from_slice(pubkey_bytes.as_slice()).map_err(Error::from);
+            return PublicKey::from_slice(pubkey_bytes.as_slice()).map_err(ReadError::from);
         };
 
         let pubkey_bytes = self.pubkey.as_slice();
-        PublicKey::from_slice(pubkey_bytes).map_err(Error::from)
+        PublicKey::from_slice(pubkey_bytes).map_err(ReadError::from)
     }
 }
 
@@ -656,11 +657,12 @@ pub struct NewCommand {
 impl NewCommand {
     pub fn new(
         slot: Option<u8>,
-        chain_code: Option<[u8; 32]>,
+        chain_code: Option<ChainCode>,
         epubkey: secp256k1::PublicKey,
         xcvc: Vec<u8>,
     ) -> Self {
         let slot = slot.unwrap_or_default();
+        let chain_code = chain_code.map(|cc| cc.to_bytes());
         NewCommand {
             cmd: Self::name(),
             slot,

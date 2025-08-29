@@ -1,11 +1,11 @@
-use crate::Error;
+use crate::CkTapError;
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, NewCommand,
     NewResponse, SignCommand, SignResponse, StatusResponse, UnsealCommand, UnsealResponse,
 };
 use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
-use crate::error::CkTapError;
-use crate::tap_signer::PsbtSignError;
+use crate::error::{CardError, DeriveError, DumpError, ReadError, UnsealError};
+use crate::error::{SignPsbtError, StatusError};
 use async_trait::async_trait;
 use bitcoin::bip32::{ChainCode, DerivationPath, Fingerprint, Xpub};
 use bitcoin::secp256k1;
@@ -67,13 +67,13 @@ impl SatsCard {
     pub fn from_status(
         transport: Arc<dyn CkTransport>,
         status_response: StatusResponse,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, StatusError> {
         let pubkey = status_response.pubkey.as_slice();
-        let pubkey = PublicKey::from_slice(pubkey).map_err(Error::from)?;
+        let pubkey = PublicKey::from_slice(pubkey)?;
 
         let slots = status_response
             .slots
-            .ok_or_else(|| Error::CiborValue("Missing slots".to_string()))?;
+            .ok_or_else(|| CkTapError::CborValue("Missing slots".to_string()))?;
 
         Ok(Self {
             transport,
@@ -92,9 +92,9 @@ impl SatsCard {
     pub async fn new_slot(
         &mut self,
         slot: u8,
-        chain_code: Option<[u8; 32]>,
+        chain_code: Option<ChainCode>,
         cvc: &str,
-    ) -> Result<u8, Error> {
+    ) -> Result<u8, CkTapError> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, NewCommand::name());
         let new_command = NewCommand::new(Some(slot), chain_code, epubkey, xcvc);
         let new_response: NewResponse = transmit(self.transport(), &new_command).await?;
@@ -113,7 +113,7 @@ impl SatsCard {
     /// when they created the current slot, see: [`Self::new_slot`].
     ///
     /// Ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive
-    pub async fn derive(&mut self) -> Result<ChainCode, Error> {
+    pub async fn derive(&mut self) -> Result<ChainCode, DeriveError> {
         let app_nonce = crate::rand_nonce();
         let card_nonce = *self.card_nonce();
 
@@ -133,8 +133,7 @@ impl SatsCard {
 
         let signature = Signature::from_compact(&derive_response.sig)?;
 
-        let master_pubkey =
-            PublicKey::from_slice(&derive_response.master_pubkey).map_err(Error::from)?;
+        let master_pubkey = PublicKey::from_slice(&derive_response.master_pubkey)?;
         self.secp()
             .verify_ecdsa(&message, &signature, &master_pubkey.inner)?;
 
@@ -171,7 +170,9 @@ impl SatsCard {
             && p2wpkh_address[p2wpkh_address.len().saturating_sub(12)..]
                 == self_addr[self_addr.len().saturating_sub(12)..])
         {
-            return Err(Error::InvalidChaincode);
+            return Err(DeriveError::InvalidChainCode(
+                "Unable to derive card address".to_string(),
+            ));
         }
 
         Ok(card_chaincode)
@@ -180,7 +181,11 @@ impl SatsCard {
     /// Unseal a slot.
     ///
     /// Returns the private and corresponding public keys for that slot.
-    pub async fn unseal(&mut self, slot: u8, cvc: &str) -> Result<(PrivateKey, PublicKey), Error> {
+    pub async fn unseal(
+        &mut self,
+        slot: u8,
+        cvc: &str,
+    ) -> Result<(PrivateKey, PublicKey), UnsealError> {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, UnsealCommand::name());
         let unseal_command = UnsealCommand::new(slot, epubkey, xcvc);
         let unseal_response: UnsealResponse = transmit(self.transport(), &unseal_command).await?;
@@ -197,7 +202,7 @@ impl SatsCard {
             .map(|(session_key_byte, privkey_byte)| session_key_byte ^ privkey_byte)
             .collect();
         let privkey = PrivateKey::from_slice(&privkey, Network::Bitcoin)?;
-        let pubkey = PublicKey::from_slice(&unseal_response.pubkey).map_err(Error::from)?;
+        let pubkey = PublicKey::from_slice(&unseal_response.pubkey)?;
         // TODO should verify user provided chain code was used similar to above `derive`.
         Ok((privkey, pubkey))
     }
@@ -206,12 +211,12 @@ impl SatsCard {
     ///
     /// With the CVC the private and public slot address keys are returned.
     /// Without the CVC, the private key is not included.
-    /// If an unsealed or unused slot number is given an error is returned.
+    /// If a sealed or unused slot number is given an error is returned.
     pub async fn dump(
         &mut self,
         slot: u8,
         cvc: Option<String>,
-    ) -> Result<(Option<PrivateKey>, PublicKey), Error> {
+    ) -> Result<(Option<PrivateKey>, PublicKey), DumpError> {
         let epubkey_eprivkey_xcvc = cvc.map(|cvc| {
             let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(&cvc, DumpCommand::name());
             (epubkey, eprivkey, xcvc)
@@ -228,21 +233,21 @@ impl SatsCard {
         // throw errors
         if let Some(tampered) = dump_response.tampered {
             if tampered {
-                return Err(Error::SlotTampered(slot));
+                return Err(DumpError::SlotTampered(slot));
             }
         } else if let Some(sealed) = dump_response.sealed {
             if sealed {
-                return Err(Error::SlotSealed(slot));
+                return Err(DumpError::SlotSealed(slot));
             }
         } else if let Some(used) = dump_response.used {
             if !used {
-                return Err(Error::SlotUnused(slot));
+                return Err(DumpError::SlotUnused(slot));
             }
         }
 
         // at this point pubkey must be available
         let pubkey_bytes = dump_response.pubkey.unwrap();
-        let pubkey = PublicKey::from_slice(&pubkey_bytes).map_err(Error::from)?;
+        let pubkey = PublicKey::from_slice(&pubkey_bytes)?;
 
         // TODO use chaincode and master public key to verify pubkey or return error
 
@@ -265,10 +270,10 @@ impl SatsCard {
         Ok((seckey, pubkey))
     }
 
-    pub async fn address(&mut self) -> Result<String, Error> {
+    pub async fn address(&mut self) -> Result<String, ReadError> {
         let network = Network::Bitcoin;
         let slot_pubkey = self.read(None).await?;
-        let slot_pubkey = bitcoin::CompressedPublicKey(slot_pubkey.inner);
+        let slot_pubkey = CompressedPublicKey(slot_pubkey.inner);
         let address = Address::p2wpkh(&slot_pubkey, network);
         Ok(address.to_string())
     }
@@ -279,7 +284,7 @@ impl SatsCard {
         digest: [u8; 32],
         slot: u8,
         cvc: &str,
-    ) -> Result<SignResponse, Error> {
+    ) -> Result<SignResponse, CkTapError> {
         let (eprivkey, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, SignCommand::name());
 
         // Use the same session key to encrypt the new CVC
@@ -297,11 +302,11 @@ impl SatsCard {
 
         let sign_command = SignCommand::for_satscard(slot, xdigest, epubkey, xcvc.clone());
 
-        let mut sign_response: Result<SignResponse, Error> =
+        let mut sign_response: Result<SignResponse, CkTapError> =
             transmit(self.transport(), &sign_command).await;
 
         let mut unlucky_number_retries = 0;
-        while let Err(Error::CkTap(CkTapError::UnluckyNumber)) = sign_response {
+        while let Err(CkTapError::Card(CardError::UnluckyNumber)) = sign_response {
             let sign_command = SignCommand::for_satscard(slot, xdigest, epubkey, xcvc.clone());
 
             sign_response = transmit(self.transport(), &sign_command).await;
@@ -326,13 +331,13 @@ impl SatsCard {
         slot: u8,
         mut psbt: bitcoin::Psbt,
         cvc: &str,
-    ) -> Result<bitcoin::Psbt, PsbtSignError> {
+    ) -> Result<bitcoin::Psbt, SignPsbtError> {
         use bitcoin::{
             secp256k1::ecdsa,
             sighash::{EcdsaSighashType, SighashCache},
         };
 
-        type Error = PsbtSignError;
+        type Error = SignPsbtError;
 
         let unsigned_tx = psbt.unsigned_tx.clone();
         let mut sighash_cache = SighashCache::new(&unsigned_tx);
@@ -408,7 +413,7 @@ impl Read for SatsCard {
 
 #[async_trait]
 impl Certificate for SatsCard {
-    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, Error> {
+    async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, ReadError> {
         let pubkey = self.read(None).await?;
         Ok(Some(pubkey))
     }
@@ -429,29 +434,14 @@ impl core::fmt::Debug for SatsCard {
     }
 }
 
-/// Slot details for an in-use or unsealed slot.
-///
-/// Without the CVC, only the public details for each slot, is included.
-/// except unsealed slots where the address in full is also provided.
-#[derive(Clone, Debug)]
-pub struct SlotDetails {
-    /// Slot number.
-    pub slot: usize,
-    /// Private key for spending (for addr) or None if slot not unsealed or no CVC given.
-    pub privkey: Option<PrivateKey>,
-    /// Public key for receiving bitcoin.
-    pub pubkey: PublicKey,
-    /// Full payment address (not censored).
-    pub addr: String,
-}
-
 #[cfg(feature = "emulator")]
 #[cfg(test)]
 mod test {
+    use crate::CkTapCard;
     use crate::commands::Certificate;
     use crate::emulator::find_emulator;
     use crate::emulator::test::{CardTypeOption, EcardSubprocess};
-    use crate::{CkTapCard, Error};
+    use crate::error::DumpError;
     use bdk_wallet::chain::{BlockId, ConfirmationBlockTime};
     use bdk_wallet::template::P2Wpkh;
     use bdk_wallet::test_utils::{insert_anchor, insert_checkpoint, insert_tx, new_tx};
@@ -554,10 +544,10 @@ mod test {
         if let CkTapCard::SatsCard(mut sc) = emulator {
             // slot 0 is sealed, with cvc return sealed error
             let slot_keys = sc.dump(0, Some("123456".to_string())).await;
-            assert!(matches!(slot_keys, Err(Error::SlotSealed(slot)) if slot == 0));
+            assert!(matches!(slot_keys, Err(DumpError::SlotSealed(slot)) if slot == 0));
             // slot 0 is sealed, with no cvc return sealed error
             let slot_keys = sc.dump(0, None).await;
-            assert!(matches!(slot_keys, Err(Error::SlotSealed(slot)) if slot == 0));
+            assert!(matches!(slot_keys, Err(DumpError::SlotSealed(slot)) if slot == 0));
             // unseal slot 0
             sc.unseal(0, "123456").await.unwrap();
             // slot 0 is unsealed, with cvc return privkey
@@ -574,10 +564,10 @@ mod test {
             assert!(matches!(slot_keys, Ok((None, _))));
             // slot 1 is unused, with cvc return unused error
             let dump_response = sc.dump(1, Some("123456".to_string())).await;
-            assert!(matches!(dump_response, Err(Error::SlotUnused(slot)) if slot == 1));
+            assert!(matches!(dump_response, Err(DumpError::SlotUnused(slot)) if slot == 1));
             // slot 1 is unused, with no cvc also return unused error
             let dump_response = sc.dump(1, None).await;
-            assert!(matches!(dump_response, Err(Error::SlotUnused(slot)) if slot == 1));
+            assert!(matches!(dump_response, Err(DumpError::SlotUnused(slot)) if slot == 1));
         }
         drop(python);
     }

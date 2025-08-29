@@ -1,10 +1,8 @@
 extern crate core;
 
-use rust_cktap::Error;
 use rust_cktap::commands::{Certificate, Wait};
 use rust_cktap::{CkTapCard, pcsc, rand_chaincode};
 
-use bitcoin::secp256k1::rand;
 use rust_cktap::tap_signer::TapSignerShared;
 use std::io;
 use std::io::Write;
@@ -19,11 +17,9 @@ fn get_cvc() -> String {
 
 // Example using pcsc crate
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let card = pcsc::find_first().await?;
     dbg!(&card);
-
-    let rng = &mut rand::thread_rng();
 
     match card {
         CkTapCard::TapSigner(mut ts) => {
@@ -37,7 +33,7 @@ async fn main() -> Result<(), Error> {
 
             // only do this once per card!
             if ts.path.is_none() {
-                let chain_code = rand_chaincode(rng);
+                let chain_code = rand_chaincode();
                 ts.init(chain_code, &cvc).await.unwrap();
             }
 
@@ -66,7 +62,7 @@ async fn main() -> Result<(), Error> {
 
             // only do this once per card!
             if chip.path.is_none() {
-                let chain_code = rand_chaincode(rng);
+                let chain_code = rand_chaincode();
                 chip.init(chain_code, &get_cvc()).await.unwrap();
             }
 

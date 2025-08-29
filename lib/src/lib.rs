@@ -1,19 +1,24 @@
 extern crate core;
 
-pub use bitcoin::psbt::Psbt;
-pub use bitcoin::secp256k1::rand;
+pub use bitcoin::bip32::ChainCode;
+pub use bitcoin::key::FromSliceError;
+pub use bitcoin::psbt::{Psbt, PsbtParseError};
+pub use bitcoin::secp256k1::{Error as SecpError, rand};
+pub use bitcoin::{Network, PrivateKey, PublicKey};
 pub use bitcoin_hashes::sha256::Hash;
 
 pub use commands::CkTransport;
-pub use error::CkTapError;
-pub use error::Error;
+pub use error::{
+    CardError, CertsError, ChangeError, CkTapError, DeriveError, DumpError, ReadError,
+    SignPsbtError, StatusError, UnsealError,
+};
 
 use bitcoin::key::rand::Rng as _;
 
 pub(crate) mod apdu;
 pub mod commands;
 pub mod error;
-pub(crate) mod factory_root_key;
+pub mod factory_root_key;
 pub mod sats_card;
 pub mod sats_chip;
 pub mod tap_signer;
@@ -55,10 +60,11 @@ impl core::fmt::Debug for CkTapCard {
 
 // utility functions
 
-pub fn rand_chaincode(rng: &mut rand::rngs::ThreadRng) -> [u8; 32] {
+pub fn rand_chaincode() -> ChainCode {
+    let rng = &mut rand::thread_rng();
     let mut chain_code = [0u8; 32];
     rng.fill(&mut chain_code);
-    chain_code
+    ChainCode::from(chain_code)
 }
 
 pub fn rand_nonce() -> [u8; 16] {

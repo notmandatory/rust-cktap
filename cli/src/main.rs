@@ -4,16 +4,36 @@ use rpassword::read_password;
 use rust_cktap::commands::{Authentication, Read, Wait};
 #[cfg(feature = "emulator")]
 use rust_cktap::emulator;
+use rust_cktap::error::{DumpError, StatusError, UnsealError};
 #[cfg(not(feature = "emulator"))]
 use rust_cktap::pcsc;
-use rust_cktap::rand;
 use rust_cktap::tap_signer::TapSignerShared;
-use rust_cktap::{CkTapCard, Error, Psbt, commands::Certificate, rand_chaincode};
+use rust_cktap::{
+    CkTapCard, CkTapError, Psbt, PsbtParseError, SignPsbtError, commands::Certificate,
+    rand_chaincode,
+};
 use std::io;
 use std::io::Write;
 #[cfg(feature = "emulator")]
 use std::path::Path;
 use std::str::FromStr;
+
+/// Errors returned by the card, CBOR deserialization or value encoding, or the APDU transport.
+#[derive(Debug, thiserror::Error)]
+pub enum CliError {
+    #[error(transparent)]
+    PsbtParse(#[from] PsbtParseError),
+    #[error(transparent)]
+    Status(#[from] StatusError),
+    #[error(transparent)]
+    Unseal(#[from] UnsealError),
+    #[error(transparent)]
+    SignPsbt(#[from] SignPsbtError),
+    #[error(transparent)]
+    Dump(#[from] DumpError),
+    #[error(transparent)]
+    CkTap(#[from] CkTapError),
+}
 
 /// SatsCard CLI
 #[derive(Parser)]
@@ -125,7 +145,7 @@ enum SatsChipCommand {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), CliError> {
     // figure out what type of card we have before parsing cli args
     #[cfg(not(feature = "emulator"))]
     let mut card = pcsc::find_first().await?;
@@ -133,8 +153,6 @@ async fn main() -> Result<(), Error> {
     // if emulator feature enabled override pcsc card
     #[cfg(feature = "emulator")]
     let mut card = emulator::find_emulator(Path::new("/tmp/ecard-pipe")).await?;
-
-    let rng = &mut rand::thread_rng();
 
     match &mut card {
         CkTapCard::SatsCard(sc) => {
@@ -148,7 +166,7 @@ async fn main() -> Result<(), Error> {
                 SatsCardCommand::Read => read(sc, None).await,
                 SatsCardCommand::New => {
                     let slot = sc.slot().expect("current slot number");
-                    let chain_code = Some(rand_chaincode(rng));
+                    let chain_code = Some(rand_chaincode());
                     let response = &sc.new_slot(slot, chain_code, &cvc()).await?;
                     println!("{response}")
                 }
@@ -158,11 +176,8 @@ async fn main() -> Result<(), Error> {
                     println!("privkey: {}, pubkey: {pubkey}", privkey.to_wif())
                 }
                 SatsCardCommand::Sign { slot, psbt } => {
-                    let psbt = Psbt::from_str(&psbt).map_err(|e| Error::Psbt(e.to_string()))?;
-                    let signed_psbt = sc
-                        .sign_psbt(slot, psbt, &cvc())
-                        .await
-                        .map_err(|e| Error::SignPsbt(e.to_string()))?;
+                    let psbt = Psbt::from_str(&psbt)?;
+                    let signed_psbt = sc.sign_psbt(slot, psbt, &cvc()).await?;
                     println!("signed_psbt: {signed_psbt}");
                 }
                 SatsCardCommand::Derive => {
@@ -186,7 +201,7 @@ async fn main() -> Result<(), Error> {
                 TapSignerCommand::Certs => check_cert(ts).await,
                 TapSignerCommand::Read => read(ts, Some(cvc())).await,
                 TapSignerCommand::Init => {
-                    let chain_code = rand_chaincode(rng);
+                    let chain_code = rand_chaincode();
                     let response = &ts.init(chain_code, &cvc()).await;
                     dbg!(response);
                 }
@@ -224,7 +239,7 @@ async fn main() -> Result<(), Error> {
                 SatsChipCommand::Certs => check_cert(sc).await,
                 SatsChipCommand::Read => read(sc, Some(cvc())).await,
                 SatsChipCommand::Init => {
-                    let chain_code = rand_chaincode(rng);
+                    let chain_code = rand_chaincode();
                     let response = &sc.init(chain_code, &cvc()).await;
                     dbg!(response);
                 }
@@ -293,16 +308,10 @@ where
 {
     // if auth delay call wait
     if card.auth_delay().is_some() {
-        let mut entered_cvc = None;
         while card.auth_delay().is_some() {
-            if entered_cvc.is_none() {
-                entered_cvc = Some(cvc());
-                print!("Auth delay:");
-                io::stdout().flush().unwrap();
-            }
             print!(" {}", card.auth_delay().unwrap());
             io::stdout().flush().unwrap();
-            let _result = card.wait(entered_cvc.clone()).await.expect("wait failed");
+            card.wait(None).await.expect("wait failed");
         }
         println!();
     }

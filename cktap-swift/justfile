@@ -1,6 +1,9 @@
 default:
     just --list
 
+format:
+    swift-format format -i Tests/CKTapTests/*.swift
+
 build:
     bash ./build-xcframework.sh
 
@@ -10,5 +13,5 @@ clean:
     rm -rf .build
     rm -rf *.xcframework
 
-test:
+test: format
     swift test
