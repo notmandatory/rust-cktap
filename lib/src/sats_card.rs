@@ -112,7 +112,7 @@ impl SatsCard {
     /// The user should verify the returned card chain code matches the chain code they provided
     /// when they created the current slot, see: [`Self::new_slot`].
     ///
-    /// Ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive
+    /// Ref: <https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive>
     pub async fn derive(&mut self) -> Result<ChainCode, DeriveError> {
         let app_nonce = crate::rand_nonce();
         let card_nonce = *self.card_nonce();

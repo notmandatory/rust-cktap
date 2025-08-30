@@ -41,7 +41,3 @@ bdk_wallet = { version = "2.1.0", features = ["all-keys","test-utils"] }
 [features]
 default = []
 emulator = []
-
-[[example]]
-name = "pcsc"
-required-features = ["pcsc"]

@@ -239,7 +239,7 @@ pub trait TapSignerShared: Authentication {
     /// is captured and stored long term. This is effectively calculating the XPUB to be used on the
     /// mobile wallet.
     ///
-    /// Ref: https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#tapsigner-performs-subkey-derivation
+    /// Ref: <https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#tapsigner-performs-subkey-derivation>
     async fn derive(&mut self, path: Vec<u32>, cvc: &str) -> Result<PublicKey, DeriveError> {
         // set most significant bit to 1 to represent hardened path steps
         let path = path.iter().map(|p| p ^ (1 << 31)).collect::<Vec<_>>();
