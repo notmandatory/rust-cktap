@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 /// An Application Protocol Data Unit (APDU) is the unit of communication between a smart card
 /// reader and a smart card. This file defines the Coinkite APDU and set of command/responses.
 pub mod tap_signer;

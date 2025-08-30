@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use crate::factory_root_key::FactoryRootKey;
 use crate::{CardError, CkTapCard, CkTapError, SatsCard, TapSigner};
 use crate::{apdu::*, rand_nonce};

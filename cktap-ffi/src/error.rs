@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]

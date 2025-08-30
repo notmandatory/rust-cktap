@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use crate::error::CertsError;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin_hashes::hex::DisplayHex;

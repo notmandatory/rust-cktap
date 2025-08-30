@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 /// CLI for rust-cktap
 use clap::{Parser, Subcommand};
 use rpassword::read_password;

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use crate::CkTapError;
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, NewCommand,

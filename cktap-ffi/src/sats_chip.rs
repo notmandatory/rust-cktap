@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use crate::error::{CertsError, ChangeError, CkTapError, DeriveError, ReadError, SignPsbtError};
 use crate::tap_signer::{change, derive, init, sign_psbt};
 use crate::{ChainCode, Psbt, PublicKey, check_cert, read};

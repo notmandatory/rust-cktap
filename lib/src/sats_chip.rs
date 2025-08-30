@@ -1,3 +1,6 @@
+// Copyright (c) 2025 rust-cktap contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use async_trait::async_trait;
 use bitcoin::PublicKey;
 use bitcoin::secp256k1::{All, Secp256k1};

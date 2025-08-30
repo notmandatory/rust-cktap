@@ -1,5 +1,10 @@
 #!/bin/bash
 
+#
+# Copyright (c) 2025 rust-cktap contributors
+# SPDX-License-Identifier: MIT OR Apache-2.0
+#
+
 # This script builds local cktap Swift language bindings and corresponding cktapFFI.xcframework.
 
 TARGETDIR="../target"
