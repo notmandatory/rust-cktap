@@ -20,7 +20,6 @@ use bitcoin::key::rand::Rng as _;
 
 pub(crate) mod apdu;
 pub mod error;
-pub mod factory_root_key;
 pub mod sats_card;
 pub mod sats_chip;
 pub mod shared;

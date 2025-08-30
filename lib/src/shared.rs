@@ -1,7 +1,6 @@
 // Copyright (c) 2025 rust-cktap contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::factory_root_key::FactoryRootKey;
 use crate::{CardError, CkTapCard, CkTapError, SatsCard, TapSigner};
 use crate::{apdu::*, rand_nonce};
 
@@ -12,13 +11,62 @@ use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
 use bitcoin::secp256k1::{All, Message, Secp256k1};
 use bitcoin_hashes::sha256;
 
-use std::convert::TryFrom;
-
 use crate::error::{CertsError, ReadError, StatusError};
 use crate::sats_chip::SatsChip;
 use async_trait::async_trait;
+use bitcoin_hashes::hex::DisplayHex;
+use std::convert::TryFrom;
+use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
+
+/// Published Coinkite factory root keys.
+const PUB_FACTORY_ROOT_KEY: &str =
+    "03028a0e89e70d0ec0d932053a89ab1da7d9182bdc6d2f03e706ee99517d05d9e1";
+/// Obsolete dev value, but keeping for a little while longer.
+const DEV_FACTORY_ROOT_KEY: &str =
+    "027722ef208e681bac05f1b4b3cc478d6bf353ac9a09ff0c843430138f65c27bab";
+
+pub enum FactoryRootKey {
+    Pub(secp256k1::PublicKey),
+    Dev(secp256k1::PublicKey),
+}
+
+impl TryFrom<secp256k1::PublicKey> for FactoryRootKey {
+    type Error = CertsError;
+
+    fn try_from(pubkey: secp256k1::PublicKey) -> Result<Self, CertsError> {
+        match pubkey.serialize().to_lower_hex_string().as_str() {
+            PUB_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Pub(pubkey)),
+            DEV_FACTORY_ROOT_KEY => Ok(FactoryRootKey::Dev(pubkey)),
+            _ => Err(CertsError::InvalidRootCert(
+                pubkey.serialize().to_lower_hex_string(),
+            )),
+        }
+    }
+}
+
+impl FactoryRootKey {
+    pub fn name(&self) -> String {
+        match &self {
+            FactoryRootKey::Pub(_) => "Root Factory Certificate".to_string(),
+            FactoryRootKey::Dev(_) => "Root Factory Certificate (TESTING ONLY)".to_string(),
+        }
+    }
+}
+
+impl Debug for FactoryRootKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            FactoryRootKey::Pub(pk) => {
+                write!(f, "FactoryRootKey::Pub({pk:?})")
+            }
+            FactoryRootKey::Dev(pk) => {
+                write!(f, "FactoryRootKey::Dev({pk:?})")
+            }
+        }
+    }
+}
 
 /// Helper functions for authenticated commands.
 pub trait Authentication {

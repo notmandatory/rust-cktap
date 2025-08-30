@@ -16,7 +16,7 @@ use crate::sats_chip::SatsChip;
 use crate::tap_signer::TapSigner;
 use futures::lock::Mutex;
 use rust_cktap::Network;
-use rust_cktap::factory_root_key::FactoryRootKey;
+use rust_cktap::shared::FactoryRootKey;
 use rust_cktap::shared::{Certificate, Read};
 use std::fmt::Debug;
 use std::str::FromStr;

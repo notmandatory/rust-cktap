@@ -20,15 +20,15 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 #### Shared Commands
 
 - [x] [status](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#status)
-- [x] [read](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#status) (messages)
+- [x] [read](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#read)
   - [x] response verification
-- [x] [derive](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive) (messages)
-  - [x] response verification
+- [x] [derive](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#derive)
+  - [ ] response verification
 - [x] [certs](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#certs)
 - [x] [new](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#new)
-- [x] [nfc](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#nfc)
-- [x] [sign](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#sign) (messages)
-  - [ ] response verification
+- [ ] [nfc](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#nfc)
+- [x] [sign](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#sign)
+  - [x] response verification
 - [x] [wait](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#wait)
 
 #### SATSCARD-Only Commands
@@ -39,31 +39,49 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 #### TAPSIGNER-Only Commands
 
 - [x] [change](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#change)
-- [x] [xpub](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#xpub)
+- [ ] [xpub](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#xpub)
 - [x] [backup](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#backup)
 
-### Automated Testing with Emulator
+### Automated and CLI Testing with Emulator
+
+#### Prerequisites
 
 1. Install dependencies for [cktap emulator](https://github.com/coinkite/coinkite-tap-proto/blob/master/emulator/README.md)
-2. run tests with emulator: `just test`
+
+#### Run tests with emulator
+
+```
+just test
+```
+
+#### Run CLI with emulated card reader
+
+```
+just start # for SATSCARD emulator
+just start -t # for TAPSIGNER emulator
+just run_emu --help
+just run_emu certs
+just run_emu read
+just stop # stop emulator
+```
 
 ### Manual Testing with real cards
 
 #### Prerequisites
 
-1. USB PCSC NFC card reader, for example:
+1. Get USB PCSC NFC card reader, for example:
    - [OMNIKEY 5022 CL](https://www.hidglobal.com/products/omnikey-5022-reader)
-2. Coinkite SATSCARD, TAPSIGNER, or SATSCHIP cards
-   Install vendor PCSC driver
-3. Connect NFC reader to desktop system
-4. Place SATSCARD, TAPSIGNER, or SATSCHIP on reader
+2. Get Coinkite SATSCARD, TAPSIGNER, or SATSCHIP cards
+3. Install card reader PCSC driver
+4. Connect USB PCSC NFC reader to desktop system
+5. Place SATSCARD, TAPSIGNER, or SATSCHIP on reader
 
-#### Run CLI
+#### Run CLI with desktop USB PCSC NFC card reader
 
 ```
-cargo run -p cktap-cli -- --help
-cargo run -p cktap-cli -- certs
-cargo run -p cktap-cli -- read
+just run --help
+just run certs
+just run read
 ```
 
 ## Minimum Supported Rust Version (MSRV)
