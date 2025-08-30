@@ -16,8 +16,8 @@ use crate::sats_chip::SatsChip;
 use crate::tap_signer::TapSigner;
 use futures::lock::Mutex;
 use rust_cktap::Network;
-use rust_cktap::commands::{Certificate, Read};
 use rust_cktap::factory_root_key::FactoryRootKey;
+use rust_cktap::shared::{Certificate, Read};
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -132,7 +132,7 @@ pub enum CkTapCard {
 #[uniffi::export]
 pub async fn to_cktap(transport: Box<dyn CkTransport>) -> Result<CkTapCard, StatusError> {
     let wrapper = CkTransportWrapper(transport);
-    let cktap: rust_cktap::CkTapCard = rust_cktap::commands::to_cktap(Arc::new(wrapper)).await?;
+    let cktap: rust_cktap::CkTapCard = rust_cktap::shared::to_cktap(Arc::new(wrapper)).await?;
 
     match cktap {
         rust_cktap::CkTapCard::SatsCard(sc) => {

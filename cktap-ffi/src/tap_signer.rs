@@ -4,7 +4,7 @@
 use crate::error::{CertsError, ChangeError, CkTapError, DeriveError, ReadError, SignPsbtError};
 use crate::{ChainCode, Psbt, PublicKey, check_cert, read};
 use futures::lock::Mutex;
-use rust_cktap::commands::{Authentication, Wait};
+use rust_cktap::shared::{Authentication, Wait};
 use rust_cktap::tap_signer::TapSignerShared;
 use std::sync::Arc;
 

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use crate::apdu::{AppletSelect, CommandApdu, StatusCommand};
-use crate::commands::{CkTransport, to_cktap};
 use crate::error::StatusError;
+use crate::shared::{CkTransport, to_cktap};
 use crate::{CkTapCard, CkTapError};
 use async_trait::async_trait;
 use std::io::{Read, Write};

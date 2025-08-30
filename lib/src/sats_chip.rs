@@ -7,8 +7,8 @@ use bitcoin::secp256k1::{All, Secp256k1};
 use std::sync::Arc;
 
 use crate::apdu::StatusResponse;
-use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait};
 use crate::error::{ReadError, StatusError};
+use crate::shared::{Authentication, Certificate, CkTransport, Read, Wait};
 use crate::tap_signer::TapSignerShared;
 
 /// - SATSCHIP model: this product variant is a TAPSIGNER in all respects,

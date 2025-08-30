@@ -6,8 +6,8 @@ use crate::apdu::{
     SignResponse, StatusCommand, StatusResponse,
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
 };
-use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
 use crate::error::{ChangeError, DeriveError, ReadError, SignPsbtError, StatusError};
+use crate::shared::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
 use crate::{BIP32_HARDENED_MASK, CkTapError};
 use async_trait::async_trait;
 use bitcoin::PublicKey;

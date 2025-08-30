@@ -10,20 +10,20 @@ pub use bitcoin::secp256k1::{Error as SecpError, rand};
 pub use bitcoin::{Network, PrivateKey, PublicKey};
 pub use bitcoin_hashes::sha256::Hash;
 
-pub use commands::CkTransport;
 pub use error::{
     CardError, CertsError, ChangeError, CkTapError, DeriveError, DumpError, ReadError,
     SignPsbtError, StatusError, UnsealError,
 };
+pub use shared::CkTransport;
 
 use bitcoin::key::rand::Rng as _;
 
 pub(crate) mod apdu;
-pub mod commands;
 pub mod error;
 pub mod factory_root_key;
 pub mod sats_card;
 pub mod sats_chip;
+pub mod shared;
 pub mod tap_signer;
 
 #[cfg(feature = "emulator")]

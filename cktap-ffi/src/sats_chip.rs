@@ -5,7 +5,7 @@ use crate::error::{CertsError, ChangeError, CkTapError, DeriveError, ReadError, 
 use crate::tap_signer::{change, derive, init, sign_psbt};
 use crate::{ChainCode, Psbt, PublicKey, check_cert, read};
 use futures::lock::Mutex;
-use rust_cktap::commands::{Authentication, Wait};
+use rust_cktap::shared::{Authentication, Wait};
 use std::sync::Arc;
 
 #[derive(uniffi::Object)]

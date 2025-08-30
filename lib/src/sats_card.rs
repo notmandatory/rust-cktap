@@ -6,9 +6,9 @@ use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, NewCommand,
     NewResponse, SignCommand, SignResponse, StatusResponse, UnsealCommand, UnsealResponse,
 };
-use crate::commands::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
 use crate::error::{CardError, DeriveError, DumpError, ReadError, UnsealError};
 use crate::error::{SignPsbtError, StatusError};
+use crate::shared::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
 use async_trait::async_trait;
 use bitcoin::bip32::{ChainCode, DerivationPath, Fingerprint, Xpub};
 use bitcoin::secp256k1;
@@ -441,10 +441,10 @@ impl core::fmt::Debug for SatsCard {
 #[cfg(test)]
 mod test {
     use crate::CkTapCard;
-    use crate::commands::Certificate;
     use crate::emulator::find_emulator;
     use crate::emulator::test::{CardTypeOption, EcardSubprocess};
     use crate::error::DumpError;
+    use crate::shared::Certificate;
     use bdk_wallet::chain::{BlockId, ConfirmationBlockTime};
     use bdk_wallet::template::P2Wpkh;
     use bdk_wallet::test_utils::{insert_anchor, insert_checkpoint, insert_tx, new_tx};

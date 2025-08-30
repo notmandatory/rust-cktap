@@ -4,16 +4,15 @@
 /// CLI for rust-cktap
 use clap::{Parser, Subcommand};
 use rpassword::read_password;
-use rust_cktap::commands::{Authentication, Read, Wait};
 #[cfg(feature = "emulator")]
 use rust_cktap::emulator;
 use rust_cktap::error::{DumpError, StatusError, UnsealError};
 #[cfg(not(feature = "emulator"))]
 use rust_cktap::pcsc;
+use rust_cktap::shared::{Authentication, Read, Wait};
 use rust_cktap::tap_signer::TapSignerShared;
 use rust_cktap::{
-    CkTapCard, CkTapError, Psbt, PsbtParseError, SignPsbtError, commands::Certificate,
-    rand_chaincode,
+    CkTapCard, CkTapError, Psbt, PsbtParseError, SignPsbtError, rand_chaincode, shared::Certificate,
 };
 use std::io;
 use std::io::Write;

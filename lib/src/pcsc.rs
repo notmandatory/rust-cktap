@@ -4,8 +4,8 @@
 extern crate core;
 
 use crate::CkTapError;
-use crate::commands::to_cktap;
 use crate::error::StatusError;
+use crate::shared::to_cktap;
 use crate::{CkTapCard, CkTransport};
 use async_trait::async_trait;
 use pcsc::{Card, Context, MAX_BUFFER_SIZE, Protocols, Scope, ShareMode};

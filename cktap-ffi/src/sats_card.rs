@@ -6,7 +6,7 @@ use crate::error::{
 };
 use crate::{ChainCode, PrivateKey, Psbt, PublicKey, check_cert, read};
 use futures::lock::Mutex;
-use rust_cktap::commands::{Authentication, Wait};
+use rust_cktap::shared::{Authentication, Wait};
 use std::sync::Arc;
 
 #[derive(uniffi::Object)]
