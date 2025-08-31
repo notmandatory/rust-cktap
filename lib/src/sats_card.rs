@@ -8,7 +8,7 @@ use crate::apdu::{
 };
 use crate::error::{CardError, DeriveError, DumpError, ReadError, UnsealError};
 use crate::error::{SignPsbtError, StatusError};
-use crate::shared::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
+use crate::shared::{Authentication, Certificate, CkTransport, Nfc, Read, Wait, transmit};
 use async_trait::async_trait;
 use bitcoin::bip32::{ChainCode, DerivationPath, Fingerprint, Xpub};
 use bitcoin::secp256k1;
@@ -421,6 +421,9 @@ impl Certificate for SatsCard {
         Ok(Some(pubkey))
     }
 }
+
+#[async_trait]
+impl Nfc for SatsCard {}
 
 impl core::fmt::Debug for SatsCard {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

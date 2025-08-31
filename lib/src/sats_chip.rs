@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::apdu::StatusResponse;
 use crate::error::{ReadError, StatusError};
-use crate::shared::{Authentication, Certificate, CkTransport, Read, Wait};
+use crate::shared::{Authentication, Certificate, CkTransport, Nfc, Read, Wait};
 use crate::tap_signer::TapSignerShared;
 
 /// - SATSCHIP model: this product variant is a TAPSIGNER in all respects,
@@ -109,6 +109,9 @@ impl Certificate for SatsChip {
         Ok(None)
     }
 }
+
+#[async_trait]
+impl Nfc for SatsChip {}
 
 impl core::fmt::Debug for SatsChip {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

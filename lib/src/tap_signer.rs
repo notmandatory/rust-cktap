@@ -7,7 +7,7 @@ use crate::apdu::{
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
 };
 use crate::error::{ChangeError, DeriveError, ReadError, SignPsbtError, StatusError};
-use crate::shared::{Authentication, Certificate, CkTransport, Read, Wait, transmit};
+use crate::shared::{Authentication, Certificate, CkTransport, Nfc, Read, Wait, transmit};
 use crate::{BIP32_HARDENED_MASK, CkTapError};
 use async_trait::async_trait;
 use bitcoin::PublicKey;
@@ -315,6 +315,9 @@ pub trait TapSignerShared: Authentication {
         Ok(())
     }
 }
+
+#[async_trait]
+impl Nfc for TapSigner {}
 
 impl TapSignerShared for TapSigner {}
 

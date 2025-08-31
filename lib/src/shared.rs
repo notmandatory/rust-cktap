@@ -299,6 +299,15 @@ pub trait Certificate: Read {
     async fn slot_pubkey(&mut self) -> Result<Option<PublicKey>, ReadError>;
 }
 
+#[async_trait]
+pub trait Nfc: Authentication {
+    async fn nfc(&mut self) -> Result<String, CkTapError> {
+        let nfc_cmd = NfcCommand::default();
+        let nfc_response: NfcResponse = transmit(self.transport(), &nfc_cmd).await?;
+        Ok(nfc_response.url)
+    }
+}
+
 #[cfg(feature = "emulator")]
 #[cfg(test)]
 mod tests {
@@ -378,6 +387,41 @@ mod tests {
                     let response = sc.check_certificate().await;
                     assert!(response.is_err());
                     matches!(response, Err(CertsError::InvalidRootCert(pubkey)) if pubkey == emulator_root_pubkey);
+                }
+            };
+            drop(python);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_nfc_command() {
+        for card_type in CardTypeOption::values() {
+            let pipe_path = format!("/tmp/test-nfc-command-pipe{card_type}");
+            let pipe_path = Path::new(&pipe_path);
+            let python = EcardSubprocess::new(pipe_path, &card_type).unwrap();
+            let emulator = find_emulator(pipe_path).await.unwrap();
+            match emulator {
+                CkTapCard::SatsCard(mut sc) => {
+                    assert_eq!(card_type, CardTypeOption::SatsCard);
+                    let response = sc.nfc().await;
+                    assert!(response.is_ok());
+                    assert!(
+                        response
+                            .unwrap()
+                            .starts_with("https://getsatscard.com/start")
+                    )
+                }
+                CkTapCard::TapSigner(mut ts) => {
+                    assert_eq!(card_type, CardTypeOption::TapSigner);
+                    let response = ts.nfc().await;
+                    assert!(response.is_ok());
+                    assert!(response.unwrap().starts_with("https://tapsigner.com/start"))
+                }
+                CkTapCard::SatsChip(mut sc) => {
+                    assert_eq!(card_type, CardTypeOption::SatsChip);
+                    let response = sc.nfc().await;
+                    assert!(response.is_ok());
+                    assert!(response.unwrap().starts_with("https://satschip.com/start"))
                 }
             };
             drop(python);

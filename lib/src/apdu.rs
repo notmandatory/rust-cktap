@@ -468,7 +468,7 @@ impl CommandApdu for NfcCommand {
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct NfcResponse {
     /// command result
-    url: String,
+    pub url: String,
 }
 
 impl ResponseApdu for NfcResponse {}
