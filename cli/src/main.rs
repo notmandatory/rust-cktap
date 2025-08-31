@@ -114,6 +114,12 @@ enum TapSignerCommand {
     Wait,
     /// Get the card's nfc URL
     Nfc,
+    /// Read the xpub (requires CVC)
+    Xpub {
+        /// Give master (`m`) XPUB, otherwise derived XPUB
+        #[clap(short, long)]
+        master: bool,
+    },
 }
 
 /// TapSigner CLI
@@ -150,6 +156,12 @@ enum SatsChipCommand {
     Wait,
     /// Get the card's nfc URL
     Nfc,
+    /// Read the xpub (requires CVC)
+    Xpub {
+        /// Give master (`m`) XPUB, otherwise derived XPUB
+        #[clap(short, long)]
+        master: bool,
+    },
 }
 
 #[tokio::main]
@@ -238,6 +250,7 @@ async fn main() -> Result<(), CliError> {
                 }
                 TapSignerCommand::Wait => wait(ts).await,
                 TapSignerCommand::Nfc => nfc(ts).await,
+                TapSignerCommand::Xpub { master } => xpub(ts, master).await,
             }
         }
         CkTapCard::SatsChip(sc) => {
@@ -270,6 +283,7 @@ async fn main() -> Result<(), CliError> {
                 }
                 SatsChipCommand::Wait => wait(sc).await,
                 SatsChipCommand::Nfc => nfc(sc).await,
+                SatsChipCommand::Xpub { master } => xpub(sc, master).await,
             }
         }
     }
@@ -335,4 +349,14 @@ where
 {
     let nfc = card.nfc().await.expect("nfc failed");
     println!("{nfc}");
+}
+
+async fn xpub<C>(card: &mut C, master: bool)
+where
+    C: TapSignerShared + Send,
+{
+    dbg!(master);
+    let xpub = card.xpub(master, &cvc()).await.expect("xpub failed");
+    dbg!(&xpub);
+    println!("{}", xpub.to_string());
 }

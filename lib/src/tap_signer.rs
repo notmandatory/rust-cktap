@@ -316,7 +316,7 @@ pub trait TapSignerShared: Authentication {
         Ok(())
     }
 
-    async fn xpub(&mut self, cvc: &str, master: bool) -> Result<Xpub, XpubError> {
+    async fn xpub(&mut self, master: bool, cvc: &str) -> Result<Xpub, XpubError> {
         let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, XpubCommand::name());
         let xpub_command = XpubCommand::new(master, epubkey, xcvc);
         let xpub_response: XpubResponse = transmit(self.transport(), &xpub_command).await?;
@@ -420,9 +420,9 @@ mod test {
         let emulator = find_emulator(pipe_path).await.unwrap();
         if let CkTapCard::TapSigner(mut ts) = emulator {
             ts.init(rand_chaincode(), "123456").await.unwrap();
-            let xpub = ts.xpub("123456", false).await.unwrap();
+            let xpub = ts.xpub(false, "123456").await.unwrap();
             assert_eq!(xpub.depth, 3);
-            let master_xpub = ts.xpub("123456", true).await.unwrap();
+            let master_xpub = ts.xpub(true, "123456").await.unwrap();
             assert_eq!(master_xpub.depth, 0);
         }
         drop(python);
