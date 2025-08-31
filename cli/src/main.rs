@@ -108,8 +108,8 @@ enum TapSignerCommand {
     Backup,
     /// Change the PIN (CVC) used for card authentication to a new user provided one
     Change { new_cvc: String },
-    /// Sign a digest
-    Sign { to_sign: String },
+    /// Sign a PSBT
+    Sign { psbt: String },
     /// Call wait command until no auth delay
     Wait,
     /// Get the card's nfc URL
@@ -150,8 +150,8 @@ enum SatsChipCommand {
     },
     /// Change the PIN (CVC) used for card authentication to a new user provided one
     Change { new_cvc: String },
-    /// Sign a digest
-    Sign { to_sign: String },
+    /// Sign a PSBT
+    Sign { psbt: String },
     /// Call wait command until no auth delay
     Wait,
     /// Get the card's nfc URL
@@ -241,12 +241,10 @@ async fn main() -> Result<(), CliError> {
                     let response = &ts.change(&new_cvc, &cvc()).await;
                     println!("{response:?}");
                 }
-                TapSignerCommand::Sign { to_sign } => {
-                    let digest: [u8; 32] =
-                        rust_cktap::Hash::hash(to_sign.as_bytes()).to_byte_array();
-
-                    let response = &ts.sign(digest, vec![], &cvc()).await;
-                    println!("{response:?}");
+                TapSignerCommand::Sign { psbt } => {
+                    let psbt = Psbt::from_str(&psbt)?;
+                    let signed_psbt = ts.sign_psbt(psbt, &cvc()).await?;
+                    println!("signed_psbt: {signed_psbt}");
                 }
                 TapSignerCommand::Wait => wait(ts).await,
                 TapSignerCommand::Nfc => nfc(ts).await,
@@ -274,12 +272,10 @@ async fn main() -> Result<(), CliError> {
                     let response = &sc.change(&new_cvc, &cvc()).await;
                     println!("{response:?}");
                 }
-                SatsChipCommand::Sign { to_sign } => {
-                    let digest: [u8; 32] =
-                        rust_cktap::Hash::hash(to_sign.as_bytes()).to_byte_array();
-
-                    let response = &sc.sign(digest, vec![], &cvc()).await;
-                    println!("{response:?}");
+                SatsChipCommand::Sign { psbt } => {
+                    let psbt = Psbt::from_str(&psbt)?;
+                    let signed_psbt = sc.sign_psbt(psbt, &cvc()).await?;
+                    println!("signed_psbt: {signed_psbt}");
                 }
                 SatsChipCommand::Wait => wait(sc).await,
                 SatsChipCommand::Nfc => nfc(sc).await,
