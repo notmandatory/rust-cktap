@@ -6,7 +6,7 @@ use crate::error::{
 };
 use crate::{ChainCode, PrivateKey, Psbt, PublicKey, check_cert, read};
 use futures::lock::Mutex;
-use rust_cktap::shared::{Authentication, Wait};
+use rust_cktap::shared::{Authentication, Nfc, Wait};
 use std::sync::Arc;
 
 #[derive(uniffi::Object)]
@@ -126,5 +126,11 @@ impl SatsCard {
             .await
             .map(|psbt| Psbt { inner: psbt })?;
         Ok(psbt)
+    }
+
+    pub async fn nfc(&self) -> Result<String, CkTapError> {
+        let mut card = self.0.lock().await;
+        let url = card.nfc().await?;
+        Ok(url)
     }
 }

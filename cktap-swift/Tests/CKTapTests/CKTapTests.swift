@@ -29,4 +29,19 @@ final class CKTapTests: XCTestCase {
       XCTAssertEqual(status.ver, "1.0.3")
     }
   }
+  func testNfcUrl() async throws {
+    let cardEmulator = CardEmulator()
+    let card = try await toCktap(transport: cardEmulator)
+    switch card {
+        case .satsCard(let satsCard):
+          let url: String = try await satsCard.nfc()
+          print("SatsCard url: \(url)")
+        case .tapSigner(let tapSigner):
+          let url: String = try await tapSigner.nfc()
+          print("TapSigner url: \(url)")
+        case .satsChip(let satsChip):
+          let url: String = try await satsChip.nfc()
+          print("SatsChip url: \(url)")
+        }
+  }
 }

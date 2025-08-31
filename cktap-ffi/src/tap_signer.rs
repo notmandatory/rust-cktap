@@ -4,7 +4,7 @@
 use crate::error::{CertsError, ChangeError, CkTapError, DeriveError, ReadError, SignPsbtError};
 use crate::{ChainCode, Psbt, PublicKey, check_cert, read};
 use futures::lock::Mutex;
-use rust_cktap::shared::{Authentication, Wait};
+use rust_cktap::shared::{Authentication, Nfc, Wait};
 use rust_cktap::tap_signer::TapSignerShared;
 use std::sync::Arc;
 
@@ -80,6 +80,12 @@ impl TapSigner {
         let mut card = self.0.lock().await;
         change(&mut *card, new_cvc, cvc).await?;
         Ok(())
+    }
+
+    pub async fn nfc(&self) -> Result<String, CkTapError> {
+        let mut card = self.0.lock().await;
+        let url = card.nfc().await?;
+        Ok(url)
     }
 }
 
