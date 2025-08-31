@@ -39,7 +39,7 @@ It is up to the crate user to send and receive the raw cktap APDU messages via N
 #### TAPSIGNER-Only Commands
 
 - [x] [change](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#change)
-- [ ] [xpub](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#xpub)
+- [x] [xpub](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#xpub)
 - [x] [backup](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#backup)
 
 ### Automated and CLI Testing with Emulator

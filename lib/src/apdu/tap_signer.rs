@@ -8,7 +8,6 @@ use bitcoin::secp256k1;
 use bitcoin_hashes::hex::DisplayHex as _;
 use serde::{Deserialize, Serialize};
 
-// MARK: - XpubCommand
 /// TAPSIGNER only - Provides the current XPUB (BIP-32 serialized), either at the top level (master)
 /// or the derived key in use (see 'path' value in status response)
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -28,7 +27,6 @@ impl CommandApdu for XpubCommand {
 }
 
 impl XpubCommand {
-    #[allow(unused)] // TODO this needs to be used
     pub fn new(master: bool, epubkey: secp256k1::PublicKey, xcvc: Vec<u8>) -> Self {
         Self {
             cmd: Self::name(),
@@ -42,9 +40,9 @@ impl XpubCommand {
 #[derive(Deserialize, Clone)]
 pub struct XpubResponse {
     #[serde(with = "serde_bytes")]
-    xpub: Vec<u8>,
+    pub xpub: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    card_nonce: [u8; 16],
+    pub card_nonce: [u8; 16],
 }
 
 impl ResponseApdu for XpubResponse {}
@@ -58,7 +56,6 @@ impl std::fmt::Debug for XpubResponse {
     }
 }
 
-// MARK: - ChangeCommand
 /// TAPSIGNER only - Change the PIN (CVC) used for card authentication to a new user provided one
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct ChangeCommand {
@@ -104,7 +101,6 @@ pub struct ChangeResponse {
 
 impl ResponseApdu for ChangeResponse {}
 
-// MARK: - BackupCommand
 /// TAPSIGNER only - Get an encrypted backup of the card's private key
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]

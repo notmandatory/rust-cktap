@@ -1,17 +1,18 @@
 // Copyright (c) 2025 rust-cktap contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use crate::apdu::tap_signer::{XpubCommand, XpubResponse};
 use crate::apdu::{
     CommandApdu as _, DeriveCommand, DeriveResponse, NewCommand, NewResponse, SignCommand,
     SignResponse, StatusCommand, StatusResponse,
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
 };
-use crate::error::{ChangeError, DeriveError, ReadError, SignPsbtError, StatusError};
+use crate::error::{ChangeError, DeriveError, ReadError, SignPsbtError, StatusError, XpubError};
 use crate::shared::{Authentication, Certificate, CkTransport, Nfc, Read, Wait, transmit};
 use crate::{BIP32_HARDENED_MASK, CkTapError};
 use async_trait::async_trait;
 use bitcoin::PublicKey;
-use bitcoin::bip32::ChainCode;
+use bitcoin::bip32::{ChainCode, Xpub};
 use bitcoin::hex::DisplayHex;
 use bitcoin::secp256k1::{self, All, Message, Secp256k1, ecdsa::Signature};
 use bitcoin_hashes::sha256;
@@ -314,6 +315,15 @@ pub trait TapSignerShared: Authentication {
         self.set_card_nonce(change_response.card_nonce);
         Ok(())
     }
+
+    async fn xpub(&mut self, cvc: &str, master: bool) -> Result<Xpub, XpubError> {
+        let (_, epubkey, xcvc) = self.calc_ekeys_xcvc(cvc, XpubCommand::name());
+        let xpub_command = XpubCommand::new(master, epubkey, xcvc);
+        let xpub_response: XpubResponse = transmit(self.transport(), &xpub_command).await?;
+        self.set_card_nonce(xpub_response.card_nonce);
+        let xpub = Xpub::decode(xpub_response.xpub.as_slice())?;
+        Ok(xpub)
+    }
 }
 
 #[async_trait]
@@ -388,5 +398,33 @@ impl core::fmt::Debug for TapSigner {
             .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .field("auth_delay", &self.auth_delay)
             .finish()
+    }
+}
+
+#[cfg(feature = "emulator")]
+#[cfg(test)]
+mod test {
+    use crate::emulator::find_emulator;
+    use crate::emulator::test::{CardTypeOption, EcardSubprocess};
+    use crate::tap_signer::TapSignerShared;
+    use crate::{CkTapCard, rand_chaincode};
+    use std::path::Path;
+
+    // verify the xpub command works
+    #[tokio::test]
+    async fn test_tap_signer_xpub() {
+        let card_type = CardTypeOption::TapSigner;
+        let pipe_path = "/tmp/test-tapsigner-xpub-pipe";
+        let pipe_path = Path::new(&pipe_path);
+        let python = EcardSubprocess::new(pipe_path, &card_type).unwrap();
+        let emulator = find_emulator(pipe_path).await.unwrap();
+        if let CkTapCard::TapSigner(mut ts) = emulator {
+            ts.init(rand_chaincode(), "123456").await.unwrap();
+            let xpub = ts.xpub("123456", false).await.unwrap();
+            assert_eq!(xpub.depth, 3);
+            let master_xpub = ts.xpub("123456", true).await.unwrap();
+            assert_eq!(master_xpub.depth, 0);
+        }
+        drop(python);
     }
 }

@@ -185,6 +185,15 @@ pub enum DeriveError {
     InvalidChainCode(String),
 }
 
+/// Errors returned by the `xpub` command.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum XpubError {
+    #[error(transparent)]
+    CkTap(#[from] CkTapError),
+    #[error(transparent)]
+    Bip32(#[from] bitcoin::bip32::Error),
+}
+
 /// Errors returned by the `unseal` command.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum UnsealError {
