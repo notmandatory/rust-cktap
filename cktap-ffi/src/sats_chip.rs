@@ -1,11 +1,14 @@
 // Copyright (c) 2025 rust-cktap contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::error::{CertsError, ChangeError, CkTapError, DeriveError, ReadError, SignPsbtError};
+use crate::error::{
+    CertsError, ChangeError, CkTapError, DeriveError, ReadError, SignPsbtError, XpubError,
+};
 use crate::tap_signer::{change, derive, init, sign_psbt};
-use crate::{ChainCode, Psbt, PublicKey, check_cert, read};
+use crate::{ChainCode, Psbt, PublicKey, Xpub, check_cert, read};
 use futures::lock::Mutex;
 use rust_cktap::shared::{Authentication, Nfc, Wait};
+use rust_cktap::tap_signer::TapSignerShared;
 use std::sync::Arc;
 
 #[derive(uniffi::Object)]
@@ -84,5 +87,11 @@ impl SatsChip {
         let mut card = self.0.lock().await;
         let url = card.nfc().await?;
         Ok(url)
+    }
+
+    pub async fn xpub(&self, master: bool, cvc: String) -> Result<Xpub, XpubError> {
+        let mut card = self.0.lock().await;
+        let xpub = card.xpub(master, &cvc).await?;
+        Ok(Xpub { inner: xpub })
     }
 }

@@ -376,3 +376,26 @@ impl From<rust_cktap::ChangeError> for ChangeError {
         }
     }
 }
+
+/// Errors returned by the `xpub` command.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+pub enum XpubError {
+    #[error(transparent)]
+    CkTap {
+        #[from]
+        err: CkTapError,
+    },
+    #[error("BIP32 error: {msg}")]
+    Bip32 { msg: String },
+}
+
+impl From<rust_cktap::XpubError> for XpubError {
+    fn from(value: rust_cktap::XpubError) -> Self {
+        match value {
+            rust_cktap::XpubError::CkTap(err) => XpubError::CkTap { err: err.into() },
+            rust_cktap::XpubError::Bip32(err) => XpubError::Bip32 {
+                msg: err.to_string(),
+            },
+        }
+    }
+}

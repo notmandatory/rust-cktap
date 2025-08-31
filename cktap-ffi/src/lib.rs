@@ -18,7 +18,7 @@ use futures::lock::Mutex;
 use rust_cktap::Network;
 use rust_cktap::shared::FactoryRootKey;
 use rust_cktap::shared::{Certificate, Read};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -119,6 +119,24 @@ impl Psbt {
 
     pub fn to_base64(&self) -> String {
         self.inner.to_string()
+    }
+}
+
+#[derive(uniffi::Object, Clone, Eq, PartialEq)]
+pub struct Xpub {
+    inner: rust_cktap::Xpub,
+}
+
+#[uniffi::export]
+impl Xpub {
+    pub fn encode(&self) -> Vec<u8> {
+        self.inner.encode().to_vec()
+    }
+}
+
+impl Display for Xpub {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner)
     }
 }
 

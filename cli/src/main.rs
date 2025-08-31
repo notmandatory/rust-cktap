@@ -358,5 +358,5 @@ where
     dbg!(master);
     let xpub = card.xpub(master, &cvc()).await.expect("xpub failed");
     dbg!(&xpub);
-    println!("{}", xpub.to_string());
+    println!("{xpub}");
 }

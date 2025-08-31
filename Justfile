@@ -28,9 +28,13 @@ help:
 
 # start the cktap emulator on /tmp/ecard-pipe
 start *OPTS: setup
-    source emulator_env/bin/activate; python3 coinkite/coinkite-tap-proto/emulator/ecard.py emulate {{OPTS}} &> emulator_env/output.log & \
-    echo $! > emulator_env/ecard.pid
-    echo "started emulator, pid:" `cat emulator_env/ecard.pid`
+    if [ -f emulator_env/ecard.pid ]; then \
+        echo "Emulator already running, pid:" `cat emulator_env/ecard.pid`; \
+    else \
+        source emulator_env/bin/activate; python3 coinkite/coinkite-tap-proto/emulator/ecard.py emulate {{OPTS}} &> emulator_env/output.log & \
+        echo $! > emulator_env/ecard.pid; \
+        echo "started emulator, pid:" `cat emulator_env/ecard.pid`; \
+    fi
 
 # stop the cktap emulator
 stop:
