@@ -9,7 +9,7 @@ use rust_cktap::emulator;
 use rust_cktap::error::{DumpError, StatusError, UnsealError};
 #[cfg(not(feature = "emulator"))]
 use rust_cktap::pcsc;
-use rust_cktap::shared::{Authentication, Read, Wait};
+use rust_cktap::shared::{Authentication, Nfc, Read, Wait};
 use rust_cktap::tap_signer::TapSignerShared;
 use rust_cktap::{
     CkTapCard, CkTapError, Psbt, PsbtParseError, SignPsbtError, rand_chaincode, shared::Certificate,
@@ -74,6 +74,8 @@ enum SatsCardCommand {
     },
     /// Call wait command until no auth delay
     Wait,
+    /// Get the card's nfc URL
+    Nfc,
 }
 
 /// TapSigner CLI
@@ -110,6 +112,8 @@ enum TapSignerCommand {
     Sign { to_sign: String },
     /// Call wait command until no auth delay
     Wait,
+    /// Get the card's nfc URL
+    Nfc,
 }
 
 /// TapSigner CLI
@@ -144,6 +148,8 @@ enum SatsChipCommand {
     Sign { to_sign: String },
     /// Call wait command until no auth delay
     Wait,
+    /// Get the card's nfc URL
+    Nfc,
 }
 
 #[tokio::main]
@@ -192,6 +198,7 @@ async fn main() -> Result<(), CliError> {
                     dbg!(response);
                 }
                 SatsCardCommand::Wait => wait(sc).await,
+                SatsCardCommand::Nfc => nfc(sc).await,
             }
         }
         CkTapCard::TapSigner(ts) => {
@@ -230,6 +237,7 @@ async fn main() -> Result<(), CliError> {
                     println!("{response:?}");
                 }
                 TapSignerCommand::Wait => wait(ts).await,
+                TapSignerCommand::Nfc => nfc(ts).await,
             }
         }
         CkTapCard::SatsChip(sc) => {
@@ -261,6 +269,7 @@ async fn main() -> Result<(), CliError> {
                     println!("{response:?}");
                 }
                 SatsChipCommand::Wait => wait(sc).await,
+                SatsChipCommand::Nfc => nfc(sc).await,
             }
         }
     }
@@ -318,4 +327,12 @@ where
         println!();
     }
     println!("No auth delay.");
+}
+
+async fn nfc<C>(card: &mut C)
+where
+    C: Nfc + Send,
+{
+    let nfc = card.nfc().await.expect("nfc failed");
+    println!("{nfc}");
 }
