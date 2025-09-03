@@ -3,12 +3,13 @@
 
 extern crate core;
 
+pub use bitcoin::Network;
 pub use bitcoin::bip32::ChainCode;
 pub use bitcoin::key::FromSliceError;
 pub use bitcoin::psbt::{Psbt, PsbtParseError};
 pub use bitcoin::secp256k1::{Error as SecpError, rand};
-pub use bitcoin::{Network, PrivateKey, PublicKey, bip32::Xpub};
 pub use bitcoin_hashes::sha256::Hash;
+pub use miniscript::descriptor;
 
 pub use error::{
     CardError, CertsError, ChangeError, CkTapError, DeriveError, DumpError, ReadError,

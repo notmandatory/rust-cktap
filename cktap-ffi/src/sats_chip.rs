@@ -5,11 +5,10 @@ use crate::error::{
     CertsError, ChangeError, CkTapError, DeriveError, ReadError, SignPsbtError, XpubError,
 };
 use crate::tap_signer::{change, derive, init, sign_psbt};
-use crate::{ChainCode, Psbt, PublicKey, Xpub, check_cert, read};
+use crate::{check_cert, read};
 use futures::lock::Mutex;
 use rust_cktap::shared::{Authentication, Nfc, Wait};
 use rust_cktap::tap_signer::TapSignerShared;
-use std::sync::Arc;
 
 #[derive(uniffi::Object)]
 pub struct SatsChip(pub Mutex<rust_cktap::SatsChip>);
@@ -20,7 +19,7 @@ pub struct SatsChipStatus {
     pub ver: String,
     pub birth: u64,
     pub path: Option<Vec<u64>>,
-    pub pubkey: Vec<u8>,
+    pub pubkey: String,
     pub auth_delay: Option<u8>,
 }
 
@@ -36,12 +35,12 @@ impl SatsChip {
                 .path
                 .clone()
                 .map(|p| p.iter().map(|&p| p as u64).collect()),
-            pubkey: card.pubkey().to_bytes(),
+            pubkey: card.pubkey().to_string(),
             auth_delay: card.auth_delay().map(|d| d as u8),
         }
     }
 
-    pub async fn read(&self) -> Result<Vec<u8>, ReadError> {
+    pub async fn read(&self) -> Result<String, ReadError> {
         let mut card = self.0.lock().await;
         read(&mut *card, None).await
     }
@@ -60,18 +59,18 @@ impl SatsChip {
         check_cert(&mut *card).await
     }
 
-    pub async fn init(&self, chain_code: Arc<ChainCode>, cvc: String) -> Result<(), CkTapError> {
+    pub async fn init(&self, cvc: String) -> Result<(), CkTapError> {
         let mut card = self.0.lock().await;
-        init(&mut *card, chain_code, cvc).await
+        init(&mut *card, cvc).await
     }
 
-    pub async fn sign_psbt(&self, psbt: Arc<Psbt>, cvc: String) -> Result<Psbt, SignPsbtError> {
+    pub async fn sign_psbt(&self, psbt: String, cvc: String) -> Result<String, SignPsbtError> {
         let mut card = self.0.lock().await;
         let psbt = sign_psbt(&mut *card, psbt, cvc).await?;
         Ok(psbt)
     }
 
-    pub async fn derive(&self, path: Vec<u32>, cvc: String) -> Result<PublicKey, DeriveError> {
+    pub async fn derive(&self, path: Vec<u32>, cvc: String) -> Result<String, DeriveError> {
         let mut card = self.0.lock().await;
         let pubkey = derive(&mut *card, path, cvc).await?;
         Ok(pubkey)
@@ -89,9 +88,9 @@ impl SatsChip {
         Ok(url)
     }
 
-    pub async fn xpub(&self, master: bool, cvc: String) -> Result<Xpub, XpubError> {
+    pub async fn xpub(&self, master: bool, cvc: String) -> Result<String, XpubError> {
         let mut card = self.0.lock().await;
         let xpub = card.xpub(master, &cvc).await?;
-        Ok(Xpub { inner: xpub })
+        Ok(xpub.to_string())
     }
 }

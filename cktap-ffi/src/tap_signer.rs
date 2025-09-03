@@ -4,11 +4,12 @@
 use crate::error::{
     CertsError, ChangeError, CkTapError, DeriveError, ReadError, SignPsbtError, XpubError,
 };
-use crate::{ChainCode, Psbt, PublicKey, Xpub, check_cert, read};
+use crate::{check_cert, read};
 use futures::lock::Mutex;
 use rust_cktap::shared::{Authentication, Nfc, Wait};
 use rust_cktap::tap_signer::TapSignerShared;
-use std::sync::Arc;
+use rust_cktap::{Psbt, rand_chaincode};
+use std::str::FromStr;
 
 #[derive(uniffi::Object)]
 pub struct TapSigner(pub Mutex<rust_cktap::TapSigner>);
@@ -20,7 +21,7 @@ pub struct TapSignerStatus {
     pub birth: u64,
     pub path: Option<Vec<u64>>,
     pub num_backups: u64,
-    pub pubkey: Vec<u8>,
+    pub pubkey: String,
     pub auth_delay: Option<u8>,
 }
 
@@ -37,12 +38,12 @@ impl TapSigner {
                 .clone()
                 .map(|p| p.iter().map(|&p| p as u64).collect()),
             num_backups: card.num_backups.unwrap_or_default() as u64,
-            pubkey: card.pubkey().to_bytes(),
+            pubkey: card.pubkey().to_string(),
             auth_delay: card.auth_delay().map(|d| d as u8),
         }
     }
 
-    pub async fn read(&self, cvc: String) -> Result<Vec<u8>, ReadError> {
+    pub async fn read(&self, cvc: String) -> Result<String, ReadError> {
         let mut card = self.0.lock().await;
         read(&mut *card, Some(cvc)).await
     }
@@ -61,18 +62,18 @@ impl TapSigner {
         check_cert(&mut *card).await
     }
 
-    pub async fn init(&self, chain_code: Arc<ChainCode>, cvc: String) -> Result<(), CkTapError> {
+    pub async fn init(&self, cvc: String) -> Result<(), CkTapError> {
         let mut card = self.0.lock().await;
-        init(&mut *card, chain_code, cvc).await
+        init(&mut *card, cvc).await
     }
 
-    pub async fn sign_psbt(&self, psbt: Arc<Psbt>, cvc: String) -> Result<Psbt, SignPsbtError> {
+    pub async fn sign_psbt(&self, psbt: String, cvc: String) -> Result<String, SignPsbtError> {
         let mut card = self.0.lock().await;
         let psbt = sign_psbt(&mut *card, psbt, cvc).await?;
         Ok(psbt)
     }
 
-    pub async fn derive(&self, path: Vec<u32>, cvc: String) -> Result<PublicKey, DeriveError> {
+    pub async fn derive(&self, path: Vec<u32>, cvc: String) -> Result<String, DeriveError> {
         let mut card = self.0.lock().await;
         let pubkey = derive(&mut *card, path, cvc).await?;
         Ok(pubkey)
@@ -90,44 +91,42 @@ impl TapSigner {
         Ok(url)
     }
 
-    pub async fn xpub(&self, master: bool, cvc: String) -> Result<Xpub, XpubError> {
+    pub async fn xpub(&self, master: bool, cvc: String) -> Result<String, XpubError> {
         let mut card = self.0.lock().await;
         let xpub = card.xpub(master, &cvc).await?;
-        Ok(Xpub { inner: xpub })
+        Ok(xpub.to_string())
     }
 }
 
+/// Initialize a new TAPSIGNER card.
 pub async fn init(
     card: &mut (impl TapSignerShared + Send + Sync),
-    chain_code: Arc<ChainCode>,
     cvc: String,
 ) -> Result<(), CkTapError> {
-    card.init(chain_code.inner, &cvc)
-        .await
-        .map_err(CkTapError::from)
+    let chain_code = rand_chaincode();
+    card.init(chain_code, &cvc).await.map_err(CkTapError::from)
 }
 
+/// Sign (but not finalize) the psbt
+///
+/// PSBT argument and return are encoded as base64 strings.
 pub async fn sign_psbt(
     card: &mut (impl TapSignerShared + Send + Sync),
-    psbt: Arc<Psbt>,
+    psbt: String,
     cvc: String,
-) -> Result<Psbt, SignPsbtError> {
-    let psbt = card
-        .sign_psbt((*psbt).clone().inner, &cvc)
-        .await
-        .map(|psbt| Psbt { inner: psbt })?;
-    Ok(psbt)
+) -> Result<String, SignPsbtError> {
+    let unsigned_psbt = Psbt::from_str(&psbt)?;
+    let psbt = card.sign_psbt(unsigned_psbt, &cvc).await?;
+    Ok(psbt.to_string())
 }
 
+/// Derive the pubkey at the given derivation path, return as hex serialized string
 pub async fn derive(
     card: &mut (impl TapSignerShared + Send + Sync),
     path: Vec<u32>,
     cvc: String,
-) -> Result<PublicKey, DeriveError> {
-    let pubkey = card
-        .derive(path, &cvc)
-        .await
-        .map(|pk| PublicKey { inner: pk })?;
+) -> Result<String, DeriveError> {
+    let pubkey = card.derive(path, &cvc).await.map(|pk| pk.to_string())?;
     Ok(pubkey)
 }
 

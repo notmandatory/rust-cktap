@@ -25,6 +25,7 @@ thiserror = "2.0"
 
 # bitcoin
 bitcoin = { version = "0.32.7", features = ["rand-std", "base64"] }
+miniscript = { version = "12.3" }
 bitcoin_hashes = "0.16.0"
 
 # logging

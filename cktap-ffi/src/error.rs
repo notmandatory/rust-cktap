@@ -27,34 +27,6 @@ impl From<rust_cktap::FromSliceError> for KeyError {
     }
 }
 
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum ChainCodeError {
-    #[error("Invalid length {len}, must be 32 bytes")]
-    InvalidLength { len: u64 },
-}
-
-impl From<Vec<u8>> for ChainCodeError {
-    fn from(value: Vec<u8>) -> Self {
-        ChainCodeError::InvalidLength {
-            len: value.len() as u64,
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum PsbtError {
-    #[error("Could not parse psbt: {msg}")]
-    Parse { msg: String },
-}
-
-impl From<rust_cktap::PsbtParseError> for PsbtError {
-    fn from(value: rust_cktap::PsbtParseError) -> Self {
-        PsbtError::Parse {
-            msg: value.to_string(),
-        }
-    }
-}
-
 /// Errors returned by the CkTap card.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 pub enum CardError {
@@ -319,6 +291,10 @@ pub enum SignPsbtError {
     },
     #[error("Witness program error: {msg}")]
     WitnessProgram { msg: String },
+    #[error("Error in internal PSBT data structure: {msg}")]
+    PsbtEncoding { msg: String },
+    #[error("Error in PSBT Base64 encoding: {msg}")]
+    Base64Encoding { msg: String },
 }
 
 impl From<rust_cktap::SignPsbtError> for SignPsbtError {
@@ -346,6 +322,20 @@ impl From<rust_cktap::SignPsbtError> for SignPsbtError {
             }
             rust_cktap::SignPsbtError::CkTap(err) => SignPsbtError::CkTap { err: err.into() },
             rust_cktap::SignPsbtError::WitnessProgram(msg) => SignPsbtError::WitnessProgram { msg },
+        }
+    }
+}
+
+impl From<rust_cktap::PsbtParseError> for SignPsbtError {
+    fn from(value: rust_cktap::PsbtParseError) -> SignPsbtError {
+        match value {
+            rust_cktap::PsbtParseError::PsbtEncoding(err) => SignPsbtError::PsbtEncoding {
+                msg: err.to_string(),
+            },
+            rust_cktap::PsbtParseError::Base64Encoding(err) => SignPsbtError::Base64Encoding {
+                msg: err.to_string(),
+            },
+            _ => panic!("Unexpected error: {value:?}"),
         }
     }
 }

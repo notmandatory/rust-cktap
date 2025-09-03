@@ -1,13 +1,15 @@
 // Copyright (c) 2025 rust-cktap contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use crate::check_cert;
 use crate::error::{
     CertsError, CkTapError, DeriveError, DumpError, ReadError, SignPsbtError, UnsealError,
 };
-use crate::{ChainCode, PrivateKey, Psbt, PublicKey, check_cert, read};
 use futures::lock::Mutex;
-use rust_cktap::shared::{Authentication, Nfc, Wait};
-use std::sync::Arc;
+use rust_cktap::descriptor::Wpkh;
+use rust_cktap::shared::{Authentication, Nfc, Read, Wait};
+use rust_cktap::{Psbt, rand_chaincode};
+use std::str::FromStr;
 
 #[derive(uniffi::Object)]
 pub struct SatsCard(pub Mutex<rust_cktap::SatsCard>);
@@ -20,21 +22,22 @@ pub struct SatsCardStatus {
     pub active_slot: u8,
     pub num_slots: u8,
     pub addr: Option<String>,
-    pub pubkey: Vec<u8>,
+    pub pubkey: String,
     pub auth_delay: Option<u8>,
 }
 
 #[derive(uniffi::Record, Clone)]
-pub struct UnsealedSlot {
-    slot: u8,
-    privkey: Option<Arc<PrivateKey>>,
-    pubkey: Arc<PublicKey>,
+pub struct SlotDetails {
+    privkey: Option<String>,
+    pubkey: String,
+    pubkey_descriptor: String,
 }
 
 #[uniffi::export]
 impl SatsCard {
     pub async fn status(&self) -> SatsCardStatus {
         let card = self.0.lock().await;
+        let pubkey = card.pubkey().to_string();
         SatsCardStatus {
             proto: card.proto as u64,
             ver: card.ver().to_string(),
@@ -42,21 +45,27 @@ impl SatsCard {
             active_slot: card.slots.0,
             num_slots: card.slots.1,
             addr: card.addr.clone(),
-            pubkey: card.pubkey().to_bytes(),
+            pubkey,
             auth_delay: card.auth_delay().map(|d| d as u8),
         }
     }
 
+    /// Get the current active slot's receive address
     pub async fn address(&self) -> Result<String, ReadError> {
         let mut card = self.0.lock().await;
-        card.address().await.map_err(ReadError::from)
+        let address = card.address().await?;
+        Ok(address.to_string())
     }
 
-    pub async fn read(&self) -> Result<Vec<u8>, ReadError> {
+    /// Get the current active slot's wpkh public key descriptor
+    pub async fn read(&self) -> Result<String, ReadError> {
         let mut card = self.0.lock().await;
-        read(&mut *card, None).await
+        let pubkey = card.read(None).await?;
+        let pubkey_desc = format!("{}", Wpkh::new(pubkey).unwrap());
+        Ok(pubkey_desc)
     }
 
+    /// Wait 15 seconds or until auth delay timeout is done
     pub async fn wait(&self) -> Result<(), CkTapError> {
         let mut card = self.0.lock().await;
         // if auth delay call wait
@@ -66,68 +75,68 @@ impl SatsCard {
         Ok(())
     }
 
+    /// Verify the card has authentic Coinkite root certificate
     pub async fn check_cert(&self) -> Result<(), CertsError> {
         let mut card = self.0.lock().await;
         check_cert(&mut *card).await
     }
 
-    pub async fn new_slot(
-        &self,
-        slot: u8,
-        chain_code: Option<Arc<ChainCode>>,
-        cvc: String,
-    ) -> Result<u8, CkTapError> {
+    /// Open a new slot, it will be the current active but must be unused (no address)
+    pub async fn new_slot(&self, cvc: String) -> Result<u8, DeriveError> {
         let mut card = self.0.lock().await;
-        let chain_code = chain_code.map(|cc| cc.inner);
-        card.new_slot(slot, chain_code, &cvc)
+        let (active_slot, _) = card.slots;
+        let new_slot_chain_code = rand_chaincode();
+        let new_slot = card
+            .new_slot(active_slot, Some(new_slot_chain_code), &cvc)
             .await
-            .map_err(CkTapError::from)
+            .map_err(CkTapError::from)?;
+        let derive_chain_code = card.derive().await?;
+        if derive_chain_code != new_slot_chain_code {
+            return Err(DeriveError::InvalidChainCode {
+                msg: "Chain code used by derive doesn't match new slot chain code".to_string(),
+            });
+        }
+        Ok(new_slot)
     }
 
-    pub async fn derive(&self) -> Result<ChainCode, DeriveError> {
+    /// Unseal currently active slot
+    pub async fn unseal(&self, cvc: String) -> Result<SlotDetails, UnsealError> {
         let mut card = self.0.lock().await;
-        let chain_code = card.derive().await.map(|cc| ChainCode { inner: cc })?;
-        Ok(chain_code)
-    }
-
-    pub async fn unseal(&self, slot: u8, cvc: String) -> Result<UnsealedSlot, UnsealError> {
-        let mut card = self.0.lock().await;
-        let (privkey, pubkey) = card.unseal(slot, &cvc).await?;
-        let pubkey = Arc::new(PublicKey { inner: pubkey });
-        let privkey = Some(Arc::new(PrivateKey { inner: privkey }));
-        Ok(UnsealedSlot {
-            slot,
-            pubkey,
-            privkey,
+        let active_slot = card.slots.0;
+        let (privkey, pubkey) = card.unseal(active_slot, &cvc).await?;
+        Ok(SlotDetails {
+            privkey: Some(privkey.to_string()),
+            pubkey: pubkey.to_string(),
+            pubkey_descriptor: format!("{}", Wpkh::new(pubkey).unwrap()),
         })
     }
 
-    pub async fn dump(&self, slot: u8, cvc: Option<String>) -> Result<UnsealedSlot, DumpError> {
+    /// This is only needed for debugging, use `sign_psbt` for signing
+    /// If no CVC given only pubkey and pubkey descriptor returned.
+    pub async fn dump(&self, slot: u8, cvc: Option<String>) -> Result<SlotDetails, DumpError> {
         let mut card = self.0.lock().await;
         let (privkey, pubkey) = card.dump(slot, cvc).await?;
-        let pubkey = Arc::new(PublicKey { inner: pubkey });
-        let privkey = privkey.map(|sk| Arc::new(PrivateKey { inner: sk }));
-        Ok(UnsealedSlot {
-            slot,
-            pubkey,
-            privkey,
+        Ok(SlotDetails {
+            privkey: privkey.map(|sk| sk.to_string()),
+            pubkey: pubkey.to_string(),
+            pubkey_descriptor: format!("{}", Wpkh::new(pubkey).unwrap()),
         })
     }
 
+    /// Sign PSBT, base64 encoded
     pub async fn sign_psbt(
         &self,
         slot: u8,
-        psbt: Arc<Psbt>,
+        psbt: String,
         cvc: String,
-    ) -> Result<Psbt, SignPsbtError> {
+    ) -> Result<String, SignPsbtError> {
         let mut card = self.0.lock().await;
-        let psbt = card
-            .sign_psbt(slot, (*psbt).clone().inner, &cvc)
-            .await
-            .map(|psbt| Psbt { inner: psbt })?;
-        Ok(psbt)
+        let psbt = Psbt::from_str(&psbt)?;
+        let signed_psbt = card.sign_psbt(slot, psbt, &cvc).await?;
+        Ok(signed_psbt.to_string())
     }
 
+    /// Return the same URL as given with a NFC tap.
     pub async fn nfc(&self) -> Result<String, CkTapError> {
         let mut card = self.0.lock().await;
         let url = card.nfc().await?;

@@ -17,6 +17,22 @@ final class CKTapTests: XCTestCase {
       let address: String = try await satsCard.address()
       print("SatsCard address: \(address)")
       XCTAssertEqual(address, "bc1qdu05evh9kw0w482lfl2ktxm6ylp060km28z8fr")
+      let cardPubkey: String = await satsCard.status().pubkey
+      print("SatsCard card pubkey: \(cardPubkey)")
+      let pubkeyDesc: String = try await satsCard.read()
+      print("SatsCard pubkey desc: \(pubkeyDesc)")
+      let activeSlot = await satsCard.status().activeSlot
+      print("SatsCard active slot: \(activeSlot)")
+      let unsealResult: SlotDetails = try await satsCard.unseal(cvc: "123456")
+      print("SatsCard unseal result: \(unsealResult)")
+      let dumpResult: SlotDetails = try await satsCard.dump(slot: activeSlot, cvc: "123456")
+      print("SatsCard dump result: \(dumpResult)")
+      let activeSlot2 = await satsCard.status().activeSlot
+      print("SatsCard active slot2: \(activeSlot2)")
+      let new_slot = try await satsCard.newSlot(cvc: "123456")
+      print("SatsCard new slot: \(new_slot)")
+      let activeSlot3 = await satsCard.status().activeSlot
+      print("SatsCard active slot3: \(activeSlot3)")
     case .tapSigner(let tapSigner):
       let status = await tapSigner.status()
       print("Handling TapSigner with status: \(status)")
@@ -51,10 +67,10 @@ final class CKTapTests: XCTestCase {
     case .satsCard(_):
       print("SatsCard does not support he xpub command.")
     case .tapSigner(let tapSigner):
-      let xpub: String = try await tapSigner.xpub(master: true, cvc: "123456").toString()
+      let xpub: String = try await tapSigner.xpub(master: true, cvc: "123456")
       print("TapSigner master xpub: \(xpub)")
     case .satsChip(let satsChip):
-      let xpub: String = try await satsChip.xpub(master: false, cvc: "123456").toString()
+      let xpub: String = try await satsChip.xpub(master: false, cvc: "123456")
       print("SatsChip xpub: \(xpub)")
     }
   }

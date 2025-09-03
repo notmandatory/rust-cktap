@@ -188,6 +188,7 @@ async fn main() -> Result<(), CliError> {
                     let slot = sc.slot().expect("current slot number");
                     let chain_code = Some(rand_chaincode());
                     let response = &sc.new_slot(slot, chain_code, &cvc()).await?;
+                    println!("chain_code: {chain_code:?}");
                     println!("{response}")
                 }
                 SatsCardCommand::Unseal => {

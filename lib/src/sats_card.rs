@@ -3,8 +3,9 @@
 
 use crate::CkTapError;
 use crate::apdu::{
-    CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse, NewCommand,
-    NewResponse, SignCommand, SignResponse, StatusResponse, UnsealCommand, UnsealResponse,
+    AppletSelect, CommandApdu as _, DeriveCommand, DeriveResponse, DumpCommand, DumpResponse,
+    NewCommand, NewResponse, SignCommand, SignResponse, StatusResponse, UnsealCommand,
+    UnsealResponse,
 };
 use crate::error::{CardError, DeriveError, DumpError, ReadError, UnsealError};
 use crate::error::{SignPsbtError, StatusError};
@@ -102,7 +103,13 @@ impl SatsCard {
         let new_command = NewCommand::new(Some(slot), chain_code, epubkey, xcvc);
         let new_response: NewResponse = transmit(self.transport(), &new_command).await?;
         self.card_nonce = new_response.card_nonce;
-        self.slots.0 = new_response.slot;
+
+        // Update card fields that changed by re-getting status
+        let status_cmd = AppletSelect::default();
+        let status_response: StatusResponse = transmit(self.transport(), &status_cmd).await?;
+        self.slots = status_response.slots.unwrap();
+        self.addr = status_response.addr;
+        self.card_nonce = status_response.card_nonce;
 
         Ok(new_response.slot)
     }
@@ -194,6 +201,13 @@ impl SatsCard {
         let unseal_response: UnsealResponse = transmit(self.transport(), &unseal_command).await?;
         self.set_card_nonce(unseal_response.card_nonce);
 
+        // Update card fields that changed by re-getting status
+        let status_cmd = AppletSelect::default();
+        let status_response: StatusResponse = transmit(self.transport(), &status_cmd).await?;
+        self.slots = status_response.slots.unwrap();
+        self.addr = status_response.addr;
+        self.set_card_nonce(status_response.card_nonce);
+
         // private key for spending (for addr), 32 bytes
         // the private key is encrypted, XORed with the session key, need to decrypt
         let session_key = secp256k1::ecdh::SharedSecret::new(&self.pubkey().inner, &eprivkey);
@@ -206,7 +220,6 @@ impl SatsCard {
             .collect();
         let privkey = PrivateKey::from_slice(&privkey, Network::Bitcoin)?;
         let pubkey = PublicKey::from_slice(&unseal_response.pubkey)?;
-        // TODO should verify user provided chain code was used similar to above `derive`.
         Ok((privkey, pubkey))
     }
 
