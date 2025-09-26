@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+rust-version.workspace = true
 description = "A Rust implementation of the Coinkite Tap Protocol (cktap) for use with SATSCARD, TAPSIGNER, and SATSCHIP products."
 keywords = ["bitcoin", "wallet", "smartcard", "cktap"]
 readme = "../README.md"
