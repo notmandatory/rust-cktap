@@ -261,8 +261,11 @@ impl SatsCard {
             }
         }
 
-        // at this point pubkey must be available
-        let pubkey_bytes = dump_response.pubkey.unwrap();
+        // at this point the card is expected to include the pubkey; if not, treat it as sealed.
+        let pubkey_bytes = match dump_response.pubkey {
+            Some(bytes) => bytes,
+            None => return Err(DumpError::SlotSealed(slot)),
+        };
         let pubkey = PublicKey::from_slice(&pubkey_bytes)?;
 
         // TODO use chaincode and master public key to verify pubkey or return error
@@ -456,6 +459,7 @@ impl core::fmt::Debug for SatsCard {
 #[cfg(feature = "emulator")]
 #[cfg(test)]
 mod test {
+    #![allow(deprecated)] // bdk_wallet::SignOptions is deprecated upstream; tests still rely on it.
     use crate::CkTapCard;
     use crate::emulator::find_emulator;
     use crate::emulator::test::{CardTypeOption, EcardSubprocess};
