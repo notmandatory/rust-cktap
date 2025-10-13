@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use crate::apdu::StatusResponse;
 use crate::error::{ReadError, StatusError};
-use crate::shared::{Authentication, Certificate, CkTransport, Nfc, Read, Wait};
+use crate::shared::{
+    Authentication, Certificate, CkTransport, Nfc, Read, Wait, card_pubkey_to_ident,
+};
 use crate::tap_signer::TapSignerShared;
 
 /// - SATSCHIP model: this product variant is a TAPSIGNER in all respects,
@@ -67,6 +69,10 @@ impl Authentication for SatsChip {
 impl TapSignerShared for SatsChip {}
 
 impl SatsChip {
+    pub fn card_ident(&self) -> String {
+        card_pubkey_to_ident(&self.pubkey)
+    }
+
     pub fn try_from_status(
         transport: Arc<dyn CkTransport>,
         status_response: StatusResponse,
@@ -121,6 +127,7 @@ impl core::fmt::Debug for SatsChip {
             .field("birth", &self.birth)
             .field("path", &self.path)
             .field("num_backups", &self.num_backups)
+            .field("card_ident", &self.card_ident())
             .field("pubkey", &self.pubkey)
             .field("card_nonce", &self.card_nonce)
             .field("auth_delay", &self.auth_delay)

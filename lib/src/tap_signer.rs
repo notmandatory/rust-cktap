@@ -8,7 +8,9 @@ use crate::apdu::{
     tap_signer::{BackupCommand, BackupResponse, ChangeCommand, ChangeResponse},
 };
 use crate::error::{ChangeError, DeriveError, ReadError, SignPsbtError, StatusError, XpubError};
-use crate::shared::{Authentication, Certificate, CkTransport, Nfc, Read, Wait, transmit};
+use crate::shared::{
+    Authentication, Certificate, CkTransport, Nfc, Read, Wait, card_pubkey_to_ident, transmit,
+};
 use crate::{BIP32_HARDENED_MASK, CkTapError};
 use async_trait::async_trait;
 use bitcoin::PublicKey;
@@ -332,6 +334,10 @@ impl Nfc for TapSigner {}
 impl TapSignerShared for TapSigner {}
 
 impl TapSigner {
+    pub fn card_ident(&self) -> String {
+        card_pubkey_to_ident(&self.pubkey)
+    }
+
     pub fn try_from_status(
         transport: Arc<dyn CkTransport>,
         status_response: StatusResponse,
@@ -394,6 +400,7 @@ impl core::fmt::Debug for TapSigner {
             .field("birth", &self.birth)
             .field("path", &self.path)
             .field("num_backups", &self.num_backups)
+            .field("card_ident", &self.card_ident())
             .field("pubkey", &self.pubkey)
             .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .field("auth_delay", &self.auth_delay)

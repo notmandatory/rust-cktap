@@ -22,6 +22,7 @@ pub struct TapSignerStatus {
     pub path: Option<Vec<u64>>,
     pub num_backups: u64,
     pub pubkey: String,
+    pub card_ident: String,
     pub auth_delay: Option<u8>,
 }
 
@@ -39,6 +40,7 @@ impl TapSigner {
                 .map(|p| p.iter().map(|&p| p as u64).collect()),
             num_backups: card.num_backups.unwrap_or_default() as u64,
             pubkey: card.pubkey().to_string(),
+            card_ident: card.card_ident(),
             auth_delay: card.auth_delay().map(|d| d as u8),
         }
     }

@@ -10,6 +10,7 @@ use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId, Signature};
 use bitcoin::secp256k1::{All, Message, Secp256k1};
 use bitcoin_hashes::sha256;
+use data_encoding::BASE32_NOPAD;
 
 use crate::error::{CertsError, ReadError, StatusError};
 use crate::sats_chip::SatsChip;
@@ -78,6 +79,9 @@ pub trait Authentication {
     fn auth_delay(&self) -> &Option<usize>;
     fn set_auth_delay(&mut self, auth_delay: Option<usize>);
     fn transport(&self) -> Arc<dyn CkTransport>;
+    fn card_ident(&self) -> String {
+        card_pubkey_to_ident(self.pubkey())
+    }
 
     /// Calculate ephemeral key pair and XOR'd CVC.
     /// ref: ["Authenticating Commands with CVC"](https://github.com/coinkite/coinkite-tap-proto/blob/master/docs/protocol.md#authenticating-commands-with-cvc)
@@ -108,6 +112,33 @@ pub trait Authentication {
 
         let xcvc = cvc_bytes.iter().zip(mask).map(|(x, y)| x ^ y).collect();
         (ephemeral_private_key, ephemeral_public_key, xcvc)
+    }
+}
+
+/// Convert a card's compressed pubkey into the standard public identifier.
+pub fn card_pubkey_to_ident(pubkey: &PublicKey) -> String {
+    let serialized = pubkey.inner.serialize();
+    let digest = sha256::Hash::hash(&serialized);
+    let digest_bytes = digest.to_byte_array();
+    let encoded = BASE32_NOPAD.encode(&digest_bytes[8..]);
+    let ident = &encoded[..20];
+
+    [&ident[0..5], &ident[5..10], &ident[10..15], &ident[15..20]].join("-")
+}
+
+#[cfg(test)]
+mod card_ident_tests {
+    use super::*;
+    use bitcoin::hex::FromHex;
+
+    #[test]
+    fn converts_pubkey_to_ident() {
+        let pubkey_bytes = Vec::<u8>::from_hex(
+            "0312d005ca1501b1603c3b00412eefe27c6b20a74c29377263b357b3aff12de6fa",
+        )
+        .expect("valid pubkey hex");
+        let pubkey = PublicKey::from_slice(&pubkey_bytes).expect("compressed pubkey");
+        assert_eq!(card_pubkey_to_ident(&pubkey), "IYKC5-XN6ZN-3AGAA-BWABB");
     }
 }
 

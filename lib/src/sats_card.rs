@@ -9,7 +9,9 @@ use crate::apdu::{
 };
 use crate::error::{CardError, DeriveError, DumpError, ReadError, UnsealError};
 use crate::error::{SignPsbtError, StatusError};
-use crate::shared::{Authentication, Certificate, CkTransport, Nfc, Read, Wait, transmit};
+use crate::shared::{
+    Authentication, Certificate, CkTransport, Nfc, Read, Wait, card_pubkey_to_ident, transmit,
+};
 use async_trait::async_trait;
 use bitcoin::bip32::{ChainCode, DerivationPath, Fingerprint, Xpub};
 use bitcoin::secp256k1;
@@ -68,6 +70,10 @@ impl Authentication for SatsCard {
 }
 
 impl SatsCard {
+    pub fn card_ident(&self) -> String {
+        card_pubkey_to_ident(&self.pubkey)
+    }
+
     pub fn from_status(
         transport: Arc<dyn CkTransport>,
         status_response: StatusResponse,
@@ -449,6 +455,7 @@ impl core::fmt::Debug for SatsCard {
             .field("birth", &self.birth)
             .field("slots", &self.slots)
             .field("addr", &self.addr)
+            .field("card_ident", &self.card_ident())
             .field("pubkey", &self.pubkey)
             .field("card_nonce", &self.card_nonce.to_lower_hex_string())
             .field("auth_delay", &self.auth_delay)

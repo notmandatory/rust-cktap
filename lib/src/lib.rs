@@ -15,7 +15,7 @@ pub use error::{
     CardError, CertsError, ChangeError, CkTapError, DeriveError, DumpError, ReadError,
     SignPsbtError, StatusError, UnsealError, XpubError,
 };
-pub use shared::CkTransport;
+pub use shared::{CkTransport, card_pubkey_to_ident};
 
 use bitcoin::key::rand::Rng as _;
 

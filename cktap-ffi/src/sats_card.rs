@@ -23,6 +23,7 @@ pub struct SatsCardStatus {
     pub num_slots: u8,
     pub addr: Option<String>,
     pub pubkey: String,
+    pub card_ident: String,
     pub auth_delay: Option<u8>,
 }
 
@@ -46,6 +47,7 @@ impl SatsCard {
             num_slots: card.slots.1,
             addr: card.addr.clone(),
             pubkey,
+            card_ident: card.card_ident(),
             auth_delay: card.auth_delay().map(|d| d as u8),
         }
     }

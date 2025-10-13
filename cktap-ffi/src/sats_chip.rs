@@ -20,6 +20,7 @@ pub struct SatsChipStatus {
     pub birth: u64,
     pub path: Option<Vec<u64>>,
     pub pubkey: String,
+    pub card_ident: String,
     pub auth_delay: Option<u8>,
 }
 
@@ -36,6 +37,7 @@ impl SatsChip {
                 .clone()
                 .map(|p| p.iter().map(|&p| p as u64).collect()),
             pubkey: card.pubkey().to_string(),
+            card_ident: card.card_ident(),
             auth_delay: card.auth_delay().map(|d| d as u8),
         }
     }
