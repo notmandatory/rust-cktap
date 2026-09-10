@@ -106,6 +106,27 @@ and good test coverage of the codebase is an important goal.
 Refactoring the project to enable fine-grained unit testing is also an ongoing
 effort.
 
+Releasing
+---------
+
+Releases of the `rust-cktap` crate are automated with [release-plz](https://release-plz.dev)
+(see `.github/workflows/release-plz.yml` and `release-plz.toml`). Only the
+`rust-cktap` library crate is released this way; `cktap-cli` and `cktap-ffi` are
+excluded (they cannot be published to crates.io).
+
+1. Commits to `master` should follow [conventional commits](https://www.conventionalcommits.org)
+   (e.g. `feat:`, `fix:`, `fix!:`) so the changelog is generated correctly.
+2. On every push to `master`, the `bitcoindevkit-release-plz` GitHub App opens or
+   updates a release PR with the version bump and changelog.
+3. A maintainer reviews and merges the release PR.
+4. The publish job waits for approval from a member of the
+   `@bitcoindevkit/rust-cktap-maintainers` team (the `release` GitHub environment).
+   Once approved it publishes to crates.io via trusted publishing and creates the
+   `rust-cktap-vX.Y.Z` git tag and GitHub release.
+
+The plain `vX.Y.Z` tag namespace is reserved for Swift package releases
+(see `.github/workflows/swift-release.yml`).
+
 Going further
 -------------
 

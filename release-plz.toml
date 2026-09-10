@@ -1,0 +1,30 @@
+# release-plz configuration.
+# https://release-plz.dev/docs/config
+#
+# Only the `rust-cktap` library crate is releasable:
+# - `cktap-ffi` has a git dependency (uniffi), which crates.io rejects
+# - `cktap-cli` has a path-only dependency on `rust-cktap`, so it cannot be
+#   published to crates.io either
+#
+# The release workflow lives in .github/workflows/release-plz.yml and publishes
+# to crates.io via trusted publishing (OIDC), gated by the `release` GitHub
+# environment (required reviewers: @bitcoindevkit/rust-cktap-maintainers).
+
+[workspace]
+
+[[package]]
+name = "cktap-cli"
+release = false
+
+[[package]]
+name = "cktap-ffi"
+release = false
+
+[[package]]
+name = "rust-cktap"
+# Single changelog at the repository root.
+changelog_path = "CHANGELOG.md"
+# Keep the plain vX.Y.Z tag namespace for the Swift package releases
+# (see .github/workflows/swift-release.yml); Rust releases use their own.
+git_tag_name = "rust-cktap-v{{ version }}"
+git_release_name = "rust-cktap-v{{ version }}"

@@ -6,7 +6,7 @@ members = ["lib", "cli", "cktap-ffi"]
 edition = "2024"
 authors = ["rust-cktap developers"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/notmandatory/rust-cktap"
+repository = "https://github.com/bitcoindevkit/rust-cktap"
 rust-version = "1.85.0"
 
 [profile.release-smaller]
