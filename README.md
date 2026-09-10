@@ -1,8 +1,8 @@
 # rust-cktap
 
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/notmandatory/rust-cktap/blob/master/LICENSE)
-[![CI](https://github.com/notmandatory/rust-cktap/actions/workflows/test.yml/badge.svg)](https://github.com/notmandatory/rust-cktap/actions/workflows/test.yml)
-[![Audit](https://github.com/notmandatory/rust-cktap/actions/workflows/audit.yml/badge.svg)](https://github.com/notmandatory/rust-cktap/actions/workflows/audit.yml)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/bitcoindevkit/rust-cktap/blob/master/LICENSE)
+[![CI](https://github.com/bitcoindevkit/rust-cktap/actions/workflows/test.yml/badge.svg)](https://github.com/bitcoindevkit/rust-cktap/actions/workflows/test.yml)
+[![Audit](https://github.com/bitcoindevkit/rust-cktap/actions/workflows/audit.yml/badge.svg)](https://github.com/bitcoindevkit/rust-cktap/actions/workflows/audit.yml)
 [![rustc](https://img.shields.io/badge/rustc-1.85.0%2B-lightgrey.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
 
 A Rust implementation of the [Coinkite Tap Protocol](https://github.com/coinkite/coinkite-tap-proto) (cktap)

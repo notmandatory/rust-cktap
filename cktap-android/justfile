@@ -6,7 +6,7 @@
 [group("Repo")]
 [doc("Open repo on GitHub in your default browser.")]
 repo:
-  open https://github.com/notmandatory/rust-cktap
+  open https://github.com/bitcoindevkit/rust-cktap
 
 [group("Repo")]
 [doc("Build the API docs.")]

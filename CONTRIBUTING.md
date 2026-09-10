@@ -18,9 +18,9 @@ Communications Channels
 
 Communication about `rust-cktap` happens primarily on the [BDK Discord](https://discord.gg/dstn4dQ).
 
-Discussion about code base improvements happens in GitHub [issues](https://github.com/notmandatory/rust-cktap/issues)
+Discussion about code base improvements happens in GitHub [issues](https://github.com/bitcoindevkit/rust-cktap/issues)
 and
-on [pull requests](https://github.com/notmandatory/rust-cktap/pulls).
+on [pull requests](https://github.com/bitcoindevkit/rust-cktap/pulls).
 
 Contribution Workflow
 ---------------------

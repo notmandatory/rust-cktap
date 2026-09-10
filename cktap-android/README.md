@@ -72,7 +72,7 @@ _Note: Kotlin `2.3.10`+, JDK 17, Android SDK API 34+, and Android NDK `27.2.1247
 
 1. Clone this repository:
    ```shell
-   git clone https://github.com/notmandatory/rust-cktap
+   git clone https://github.com/bitcoindevkit/rust-cktap
    ```
 
 2. Set up environment variables for Android SDK and NDK:
@@ -196,5 +196,5 @@ dependencies {
 
 The library currently ships native binaries for `arm64-v8a`, `armeabi-v7a`, and `x86_64`. It does **not** ship 32-bit `x86`. Use an `x86_64` emulator when testing on macOS/Linux x86 hosts.
 
-[rust-cktap]: https://github.com/notmandatory/rust-cktap
+[rust-cktap]: https://github.com/bitcoindevkit/rust-cktap
 [uniffi-rs]: https://github.com/mozilla/uniffi-rs
