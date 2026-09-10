@@ -3,14 +3,14 @@ name: Release-plz
 # How this works (see https://release-plz.dev/docs/github/quickstart):
 #
 # This workflow is triggered manually only (Actions -> "Release-plz" -> "Run
-# workflow") and takes two inputs:
-#   - command: `release-pr` to prepare/refresh the release PR, `release` to
-#     publish after the release PR has been merged.
-#   - branch: the branch to release from, e.g. `master` or `release/1.0`.
+# workflow"). Select the branch to release from in the "Use workflow from"
+# dropdown (e.g. `master` or `release/1.0`) and choose the command:
+#   - `release-pr` to prepare/refresh the release PR.
+#   - `release` to publish after the release PR has been merged.
 #
 # 1. `release-pr` opens/updates a release PR (branch prefix `release-plz-`)
 #    with the version bump and changelog for the `rust-cktap` crate, targeting
-#    the given branch, authored by the `bitcoindevkit-release-plz` GitHub App.
+#    the selected branch, authored by the `bitcoindevkit-release-plz` GitHub App.
 #    The version bump is computed from that branch's Cargo.toml. Re-run it to
 #    refresh the release PR after new commits land on the branch.
 # 2. After the release PR is reviewed and merged, run the workflow again with
@@ -22,10 +22,10 @@ name: Release-plz
 #    waits until a team member approves it in the Actions UI.
 #
 # Notes:
-# - To release from a `release/*` maintenance branch, `release-plz.toml` must
-#   exist on that branch (cherry-pick it when cutting the branch). This
-#   workflow file only needs to exist on the ref you select in the "Use
-#   workflow from" dropdown of the dispatch form (usually `master`).
+# - To release from a `release/*` maintenance branch, cherry-pick both
+#   `release-plz.toml` and this workflow file onto that branch when cutting it
+#   (and keep the workflow in sync with `master` afterwards): the run uses the
+#   workflow file from the branch selected in the dropdown.
 # - release-plz supports only one open release PR per repository, so don't
 #   prepare releases on two branches concurrently.
 
@@ -41,11 +41,6 @@ on:
         options:
           - release-pr
           - release
-      branch:
-        description: Branch to release from (master or release/*)
-        required: true
-        type: string
-        default: master
 
 permissions: {}
 
@@ -59,12 +54,12 @@ jobs:
       contents: write # push the release PR branch
       pull-requests: write # open and update the release PR
     concurrency:
-      group: release-plz-${{ inputs.branch }}
+      group: release-plz-${{ github.ref_name }}
       cancel-in-progress: false
     steps:
-      - name: Validate branch input
+      - name: Validate selected branch
         env:
-          BRANCH: ${{ inputs.branch }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           case "$BRANCH" in
             master|release/*) ;;
@@ -79,7 +74,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
       - name: Install Rust toolchain
@@ -107,9 +102,9 @@ jobs:
       pull-requests: read # detect the merged release PR
       id-token: write # crates.io trusted publishing (OIDC)
     steps:
-      - name: Validate branch input
+      - name: Validate selected branch
         env:
-          BRANCH: ${{ inputs.branch }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           case "$BRANCH" in
             master|release/*) ;;
@@ -124,7 +119,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
       - name: Install Rust toolchain
