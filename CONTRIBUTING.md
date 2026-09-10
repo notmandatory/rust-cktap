@@ -114,18 +114,28 @@ Releases of the `rust-cktap` crate are automated with [release-plz](https://rele
 `rust-cktap` library crate is released this way; `cktap-cli` and `cktap-ffi` are
 excluded (they cannot be published to crates.io).
 
-1. Commits to `master` should follow [conventional commits](https://www.conventionalcommits.org)
+1. Commits must follow [conventional commits](https://www.conventionalcommits.org)
    (e.g. `feat:`, `fix:`, `fix!:`) so the changelog is generated correctly.
-2. On every push to `master`, the `bitcoindevkit-release-plz` GitHub App opens or
-   updates a release PR with the version bump and changelog.
+2. To prepare a release, run the `Release-plz` workflow manually from the
+   Actions tab with command `release-pr` and the branch to release from
+   (`master` or a `release/*` branch). The `bitcoindevkit-release-plz` GitHub
+   App opens or updates a release PR targeting that branch with the version
+   bump and changelog. Re-run it to refresh the PR after new commits land.
 3. A maintainer reviews and merges the release PR.
-4. The publish job waits for approval from a member of the
-   `@bitcoindevkit/rust-cktap-maintainers` team (the `release` GitHub environment).
-   Once approved it publishes to crates.io via trusted publishing and creates the
-   `rust-cktap-vX.Y.Z` git tag and GitHub release.
+4. Run the `Release-plz` workflow again with command `release` on the same
+   branch. The job waits for approval from a member of the
+   `@bitcoindevkit/rust-cktap-release` team (the `release` GitHub
+   environment). Once approved it publishes to crates.io via trusted publishing
+   and creates the `rust-cktap-vX.Y.Z` git tag and GitHub release.
 
 The plain `vX.Y.Z` tag namespace is reserved for Swift package releases
 (see `.github/workflows/swift-release.yml`).
+
+To cut a maintenance release from a `release/*` branch (e.g. backporting a fix
+to a prior major version), cherry-pick `release-plz.toml` onto the branch when
+creating it, then use the workflow's branch input. Don't prepare releases on
+two branches concurrently — release-plz supports only one open release PR per
+repository.
 
 Going further
 -------------

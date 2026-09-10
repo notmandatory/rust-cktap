@@ -2,28 +2,50 @@ name: Release-plz
 
 # How this works (see https://release-plz.dev/docs/github/quickstart):
 #
-# 1. On every push to `master` the `release-pr` job opens/updates a release PR
-#    (branch prefix `release-plz-`) with the version bump and changelog for the
-#    `rust-cktap` crate, authored by the `bitcoindevkit-release-plz` GitHub App.
-# 2. When that release PR is merged, the `release` job publishes the crate to
-#    crates.io (via trusted publishing / OIDC, no token secret) and creates the
+# This workflow is triggered manually only (Actions -> "Release-plz" -> "Run
+# workflow") and takes two inputs:
+#   - command: `release-pr` to prepare/refresh the release PR, `release` to
+#     publish after the release PR has been merged.
+#   - branch: the branch to release from, e.g. `master` or `release/1.0`.
+#
+# 1. `release-pr` opens/updates a release PR (branch prefix `release-plz-`)
+#    with the version bump and changelog for the `rust-cktap` crate, targeting
+#    the given branch, authored by the `bitcoindevkit-release-plz` GitHub App.
+#    The version bump is computed from that branch's Cargo.toml. Re-run it to
+#    refresh the release PR after new commits land on the branch.
+# 2. After the release PR is reviewed and merged, run the workflow again with
+#    `release` on the same branch: it publishes the crate to crates.io (via
+#    trusted publishing / OIDC, no token secret) and creates the
 #    `rust-cktap-vX.Y.Z` git tag and GitHub release.
 # 3. The `release` job runs in the `release` GitHub environment, whose required
-#    reviewers are the @bitcoindevkit/rust-cktap-maintainers team: publishing
+#    reviewers are the @bitcoindevkit/rust-cktap-release team: publishing
 #    waits until a team member approves it in the Actions UI.
-#    `workflow_dispatch` is a manual escape hatch (publishes the version
-#    currently in Cargo.toml) and is gated by the same approval.
+#
+# Notes:
+# - To release from a `release/*` maintenance branch, `release-plz.toml` must
+#   exist on that branch (cherry-pick it when cutting the branch). This
+#   workflow file only needs to exist on the ref you select in the "Use
+#   workflow from" dropdown of the dispatch form (usually `master`).
+# - release-plz supports only one open release PR per repository, so don't
+#   prepare releases on two branches concurrently.
 
 on:
-  push:
-    branches:
-      - 'master'
-  pull_request:
-    types:
-      - closed
-    branches:
-      - 'master'
   workflow_dispatch:
+    inputs:
+      command:
+        description: >-
+          release-pr: prepare/refresh the release PR.
+          release: publish after the release PR is merged.
+        required: true
+        type: choice
+        options:
+          - release-pr
+          - release
+      branch:
+        description: Branch to release from (master or release/*)
+        required: true
+        type: string
+        default: master
 
 permissions: {}
 
@@ -32,14 +54,22 @@ jobs:
   release-pr:
     name: Create Rust Release PR
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'bitcoindevkit' && github.event_name != 'pull_request' }}
+    if: ${{ github.repository_owner == 'bitcoindevkit' && inputs.command == 'release-pr' }}
     permissions:
       contents: write # push the release PR branch
       pull-requests: write # open and update the release PR
     concurrency:
-      group: release-plz-${{ github.ref }}
+      group: release-plz-${{ inputs.branch }}
       cancel-in-progress: false
     steps:
+      - name: Validate branch input
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          case "$BRANCH" in
+            master|release/*) ;;
+            *) echo "Refusing to release from '$BRANCH' (expected 'master' or 'release/*')"; exit 1 ;;
+          esac
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v2
@@ -49,6 +79,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           persist-credentials: false
       - name: Install Rust toolchain
@@ -60,21 +91,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
-  # Publish to crates.io, tag, and create the GitHub release once the release
-  # PR is merged (or on manual dispatch). Gated by the `release` environment.
+  # Publish to crates.io, tag, and create the GitHub release. Gated by the
+  # `release` environment (team approval).
   release:
     name: Publish Rust Release
     runs-on: ubuntu-latest
-    if: >-
-      github.repository_owner == 'bitcoindevkit' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-plz-')))
+    if: ${{ github.repository_owner == 'bitcoindevkit' && inputs.command == 'release' }}
     environment: release
     permissions:
       contents: write # push tags and create GitHub releases
       pull-requests: read # detect the merged release PR
       id-token: write # crates.io trusted publishing (OIDC)
     steps:
+      - name: Validate branch input
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          case "$BRANCH" in
+            master|release/*) ;;
+            *) echo "Refusing to release from '$BRANCH' (expected 'master' or 'release/*')"; exit 1 ;;
+          esac
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v2
@@ -84,7 +120,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           persist-credentials: false
       - name: Install Rust toolchain
