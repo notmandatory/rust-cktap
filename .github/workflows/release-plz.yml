@@ -84,6 +84,10 @@ jobs:
           persist-credentials: false
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Install PCSC development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcsclite-dev swig
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
@@ -125,6 +129,10 @@ jobs:
           persist-credentials: false
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Install PCSC development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcsclite-dev swig
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
