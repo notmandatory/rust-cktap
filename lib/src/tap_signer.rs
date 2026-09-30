@@ -442,4 +442,56 @@ mod test {
         }
         drop(python);
     }
+
+    // sign_digest signs exactly the given digest with the key at the card path + sub_path
+    #[tokio::test]
+    async fn test_tap_signer_sign_digest() {
+        use bitcoin::bip32::ChildNumber;
+        use bitcoin::secp256k1::{Message, PublicKey, ecdsa::Signature};
+
+        let card_type = CardTypeOption::TapSigner;
+        let pipe_path = Path::new("/tmp/test-tapsigner-sign-digest-pipe");
+        let python = EcardSubprocess::new(pipe_path, &card_type).unwrap();
+        let emulator = find_emulator(pipe_path).await.unwrap();
+        let CkTapCard::TapSigner(mut ts) = emulator else {
+            panic!("emulator did not present a TAPSIGNER");
+        };
+        let cvc = Cvc::try_from("123456").unwrap();
+        ts.init(rand_chaincode(), &cvc).await.unwrap();
+        let account_xpub = ts.xpub(false, &cvc).await.unwrap();
+        let digest = [0x5a; 32];
+
+        for sub_path in [vec![], vec![0, 5]] {
+            let response = ts
+                .sign_digest(digest, sub_path.clone(), &cvc)
+                .await
+                .unwrap();
+
+            let child_path: Vec<ChildNumber> = sub_path
+                .iter()
+                .map(|&i| ChildNumber::from_normal_idx(i).unwrap())
+                .collect();
+            let expected_pubkey = account_xpub
+                .derive_pub(&ts.secp, &child_path)
+                .unwrap()
+                .public_key;
+            let pubkey = PublicKey::from_slice(&response.pubkey).unwrap();
+            assert_eq!(
+                pubkey, expected_pubkey,
+                "wrong key for sub_path {sub_path:?}"
+            );
+
+            let sig = Signature::from_compact(&response.sig).unwrap();
+            ts.secp
+                .verify_ecdsa(&Message::from_digest(digest), &sig, &pubkey)
+                .expect("signature must verify over the digest that was sent");
+            assert!(
+                ts.secp
+                    .verify_ecdsa(&Message::from_digest([0xa5; 32]), &sig, &pubkey)
+                    .is_err(),
+                "signature must not verify over a different digest"
+            );
+        }
+        drop(python);
+    }
 }
