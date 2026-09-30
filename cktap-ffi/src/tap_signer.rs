@@ -3,10 +3,14 @@
 
 use crate::error::{
     CertsError, ChangeError, CkTapError, CvcError, DeriveError, InitError, ReadError,
-    SignPsbtError, XpubError,
+    SignDigestError, SignPsbtError, XpubError,
 };
 use crate::{check_cert, read};
 use futures::lock::Mutex;
+use rust_cktap::secp256k1::{
+    Message, Secp256k1,
+    ecdsa::{RecoverableSignature, RecoveryId},
+};
 use rust_cktap::shared::{Authentication, Nfc, Wait};
 use rust_cktap::tap_signer::TapSignerShared;
 use rust_cktap::{Cvc, Psbt, rand_chaincode};
@@ -14,6 +18,20 @@ use std::str::FromStr;
 
 #[derive(uniffi::Object)]
 pub struct TapSigner(pub Mutex<rust_cktap::TapSigner>);
+
+/// Result of signing an arbitrary 32-byte digest with a TAPSIGNER.
+///
+/// `signature` is the 64-byte compact ECDSA signature, `pubkey` is the 33-byte compressed
+/// public key the card used to sign, and `rec_id` is the recovery id (0..=3) that lets a
+/// verifier recover `pubkey` from `signature` and the digest. Together these are sufficient
+/// to construct a BIP-137 "Bitcoin Signed Message" header byte or to verify the signature
+/// locally without an extra round-trip to the card.
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct SignedDigest {
+    pub signature: Vec<u8>,
+    pub pubkey: Vec<u8>,
+    pub rec_id: u8,
+}
 
 #[derive(uniffi::Record, Debug, Clone)]
 pub struct TapSignerStatus {
@@ -72,6 +90,24 @@ impl TapSigner {
         Ok(psbt)
     }
 
+    /// Sign an arbitrary 32-byte `digest` with the key derived at `sub_path`.
+    ///
+    /// Use this for BIP-137 "Bitcoin Signed Message", proof-of-key challenges, or any
+    /// other flow where the digest is computed off-card. Errors with
+    /// [`SignDigestError::Cvc`] if `cvc` fails local validation and with
+    /// [`SignDigestError::InvalidDigestLength`] if `digest.len() != 32`; both are
+    /// checked before any command is sent to the card.
+    pub async fn sign_digest(
+        &self,
+        digest: Vec<u8>,
+        sub_path: Vec<u32>,
+        cvc: String,
+    ) -> Result<SignedDigest, SignDigestError> {
+        let cvc = Cvc::try_from(cvc).map_err(CvcError::from)?;
+        let mut card = self.0.lock().await;
+        sign_digest(&mut *card, digest, sub_path, cvc).await
+    }
+
     pub async fn derive(&self, path: Vec<u32>, cvc: String) -> Result<String, DeriveError> {
         let cvc = Cvc::try_from(cvc).map_err(CvcError::from)?;
         let mut card = self.0.lock().await;
@@ -121,6 +157,58 @@ pub async fn sign_psbt(
     let unsigned_psbt = Psbt::from_str(&psbt)?;
     let psbt = card.sign_psbt(unsigned_psbt, &cvc).await?;
     Ok(psbt.to_string())
+}
+
+/// Sign a 32-byte digest and return the signature alongside the pubkey and recovery id.
+pub async fn sign_digest(
+    card: &mut (impl TapSignerShared + Send + Sync),
+    digest: Vec<u8>,
+    sub_path: Vec<u32>,
+    cvc: Cvc,
+) -> Result<SignedDigest, SignDigestError> {
+    let digest: [u8; 32] =
+        digest
+            .as_slice()
+            .try_into()
+            .map_err(|_| SignDigestError::InvalidDigestLength {
+                len: digest.len() as u32,
+            })?;
+
+    let sign_response = card.sign(digest, sub_path, &cvc).await?;
+
+    let rec_id = derive_recovery_id(&digest, &sign_response.sig, &sign_response.pubkey)?;
+
+    Ok(SignedDigest {
+        signature: sign_response.sig.to_vec(),
+        pubkey: sign_response.pubkey.to_vec(),
+        rec_id,
+    })
+}
+
+/// Try each of the four recovery ids until the one that recovers `expected_pubkey` is found.
+fn derive_recovery_id(
+    digest: &[u8; 32],
+    signature: &[u8; 64],
+    expected_pubkey: &[u8; 33],
+) -> Result<u8, SignDigestError> {
+    let secp = Secp256k1::verification_only();
+    let message = Message::from_digest(*digest);
+    for i in 0..4i32 {
+        let rec_id = RecoveryId::from_i32(i)
+            .map_err(|e| SignDigestError::RecoveryId { msg: e.to_string() })?;
+        let rec_sig = match RecoverableSignature::from_compact(signature, rec_id) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if let Ok(recovered) = secp.recover_ecdsa(&message, &rec_sig) {
+            if recovered.serialize() == *expected_pubkey {
+                return Ok(i as u8);
+            }
+        }
+    }
+    Err(SignDigestError::RecoveryId {
+        msg: "no recovery id recovered the expected pubkey".to_string(),
+    })
 }
 
 /// Derive the pubkey at the given derivation path, return as hex serialized string
